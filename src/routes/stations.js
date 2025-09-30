@@ -1,46 +1,33 @@
 import express from 'express';
+import { StationModel } from '../models/Station.js';
 
 const router = express.Router();
 
-// Mock data for stations (sẽ được thay thế bằng database sau)
-const mockStations = [
-  {
-    id: "station_001",
-    name: "Central Mall Charging Hub",
-    address: "123 Main Street, Downtown",
-    latitude: 40.7128,
-    longitude: -74.0060,
-    status: "available",
-    chargerType: "fast",
-    price: 0.35,
-    amenities: ["wifi", "cafe", "restroom"],
-    totalSpots: 8,
-    availableSpots: 5
-  },
-  {
-    id: "station_002", 
-    name: "Airport Express Station",
-    address: "456 Airport Road",
-    latitude: 40.6892,
-    longitude: -74.1745,
-    status: "available",
-    chargerType: "ultra_fast",
-    price: 0.45,
-    amenities: ["wifi", "restaurant"],
-    totalSpots: 12,
-    availableSpots: 8
-  }
-];
-
 // GET /api/stations - Get all stations
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
+    const { lat, lng, radius } = req.query;
+    
+    let stations;
+    if (lat && lng) {
+      // Get stations within radius
+      stations = await StationModel.getByLocation(
+        parseFloat(lat), 
+        parseFloat(lng), 
+        radius ? parseFloat(radius) : 10
+      );
+    } else {
+      // Get all stations
+      stations = await StationModel.getAll();
+    }
+
     res.json({
       success: true,
-      data: mockStations,
-      total: mockStations.length
+      data: stations,
+      total: stations.length
     });
   } catch (error) {
+    console.error('Error fetching stations:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch stations',
@@ -50,20 +37,23 @@ router.get('/', (req, res) => {
 });
 
 // GET /api/stations/:id - Get station by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const station = mockStations.find(s => s.id === req.params.id);
+    const station = await StationModel.getById(req.params.id);
+    
     if (!station) {
       return res.status(404).json({
         success: false,
         error: 'Station not found'
       });
     }
+    
     res.json({
       success: true,
       data: station
     });
   } catch (error) {
+    console.error('Error fetching station:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch station',
@@ -73,14 +63,15 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/stations - Create new station (admin only)
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
-    const newStation = {
-      id: `station_${Date.now()}`,
+    const stationData = {
       ...req.body,
-      createdAt: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
-    mockStations.push(newStation);
+    
+    const newStation = await StationModel.create(stationData);
     
     res.status(201).json({
       success: true,
@@ -88,6 +79,7 @@ router.post('/', (req, res) => {
       message: 'Station created successfully'
     });
   } catch (error) {
+    console.error('Error creating station:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to create station',

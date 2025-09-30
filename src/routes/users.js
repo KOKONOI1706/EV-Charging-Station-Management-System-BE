@@ -1,31 +1,7 @@
 import express from 'express';
+import { UserModel } from '../models/User.js';
 
 const router = express.Router();
-
-// Mock users data
-const mockUsers = [
-  {
-    id: "user_001",
-    name: "John Customer",
-    email: "john@example.com",
-    role: "customer",
-    createdAt: "2024-01-01T00:00:00Z"
-  },
-  {
-    id: "user_002", 
-    name: "Jane Staff",
-    email: "jane@evcharging.com",
-    role: "staff",
-    createdAt: "2024-01-01T00:00:00Z"
-  },
-  {
-    id: "user_003",
-    name: "Admin User",
-    email: "admin@evcharging.com", 
-    role: "admin",
-    createdAt: "2024-01-01T00:00:00Z"
-  }
-];
 
 // GET /api/users - Get all users (admin only)
 router.get('/', (req, res) => {

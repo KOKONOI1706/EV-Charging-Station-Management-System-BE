@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import stationRoutes from './routes/stations.js';
 import bookingRoutes from './routes/bookings.js';
 import userRoutes from './routes/users.js';
+import maintenanceRoutes from './routes/maintenance.js';
 
 // Load environment variables
 dotenv.config();
@@ -25,14 +26,45 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/stations', stationRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'EV Charging Backend is running',
-    timestamp: new Date().toISOString()
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    // Import Supabase để test connection
+    const { supabase } = await import('./config/supabase.js');
+    
+    // Test database connection
+    const { data, error } = await supabase
+      .from('roles')
+      .select('count')
+      .limit(1);
+
+    const healthStatus = {
+      status: 'OK',
+      message: 'EV Charging Backend is running',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      database: error ? 'ERROR' : 'CONNECTED',
+      version: process.env.npm_package_version || '1.0.0',
+      environment: process.env.NODE_ENV || 'development'
+    };
+
+    if (error) {
+      healthStatus.status = 'DEGRADED';
+      healthStatus.database_error = error.message;
+      return res.status(503).json(healthStatus);
+    }
+
+    res.json(healthStatus);
+  } catch (err) {
+    res.status(500).json({
+      status: 'ERROR',
+      message: 'Health check failed',
+      timestamp: new Date().toISOString(),
+      error: err.message
+    });
+  }
 });
 
 // 404 handler
