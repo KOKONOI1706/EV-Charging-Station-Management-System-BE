@@ -6,7 +6,6 @@ import dotenv from 'dotenv';
 import stationRoutes from './routes/stations.js';
 import bookingRoutes from './routes/bookings.js';
 import userRoutes from './routes/users.js';
-import maintenanceRoutes from './routes/maintenance.js';
 
 // Load environment variables
 dotenv.config();
@@ -26,7 +25,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/stations', stationRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/maintenance', maintenanceRoutes);
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
