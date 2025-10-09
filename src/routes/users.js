@@ -431,4 +431,94 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// PUT /api/users/:id - Update user profile
+router.put('/:id', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { name, email, phone, vehicleInfo } = req.body;
+
+    // Validate input
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    // Build update object
+    const updates = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (name) updates.name = name;
+    if (email) updates.email = email;
+    if (phone) updates.phone = phone;
+
+    // Update user in database
+    const { data: updatedUser, error: updateError } = await supabaseAdmin
+      .from('users')
+      .update(updates)
+      .eq('user_id', userId)
+      .select(`
+        user_id,
+        name,
+        email,
+        phone,
+        created_at,
+        roles!inner(name)
+      `)
+      .single();
+
+    if (updateError) {
+      console.error('Database update error:', updateError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update user profile',
+        message: updateError.message
+      });
+    }
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Transform response to match frontend User interface
+    const responseUser = {
+      id: updatedUser.user_id.toString(),
+      name: updatedUser.name,
+      email: updatedUser.email,
+      phone: updatedUser.phone || '',
+      role: updatedUser.roles.name,
+      memberSince: new Date(updatedUser.created_at).toISOString().split('T')[0],
+      totalSessions: 0,
+      totalSpent: 0,
+      favoriteStations: [],
+      vehicleInfo: vehicleInfo || {
+        make: "N/A",
+        model: "N/A",
+        year: 2020,
+        batteryCapacity: 50
+      }
+    };
+
+    res.json({
+      success: true,
+      data: {
+        user: responseUser
+      },
+      message: 'Profile updated successfully'
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update profile',
+      message: error.message
+    });
+  }
+});
+
 export default router;
