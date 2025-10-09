@@ -1,5 +1,6 @@
 import express from 'express';
 import { StationModel } from '../models/Station.js';
+import { supabase, supabaseAdmin } from '../config/supabase.js';
 
 const router = express.Router();
 
@@ -8,23 +9,122 @@ router.get('/', async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
     
-    let stations;
+    let query = supabaseAdmin
+      .from('stations')
+      .select(`
+        station_id,
+        name,
+        address,
+        latitude,
+        longitude,
+        total_points,
+        status,
+        created_at,
+        charging_points!inner(
+          point_id,
+          name,
+          status,
+          power_kw,
+          price_rate,
+          connector_types(
+            code,
+            name,
+            max_power_kw
+          )
+        )
+      `)
+      .eq('status', 'Available');
+
+    // If coordinates provided, use the nearby stations function
     if (lat && lng) {
-      // Get stations within radius
-      stations = await StationModel.getByLocation(
-        parseFloat(lat), 
-        parseFloat(lng), 
-        radius ? parseFloat(radius) : 10
-      );
-    } else {
-      // Get all stations
-      stations = await StationModel.getAll();
+      const radiusKm = radius ? parseFloat(radius) : 10;
+      const { data: nearbyStations, error } = await supabaseAdmin
+        .rpc('find_nearby_stations', {
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+          radius_km: radiusKm
+        });
+
+      if (error) {
+        console.error('Error finding nearby stations:', error);
+        // Fallback to regular query
+        const { data: stations, error: fallbackError } = await query;
+        if (fallbackError) throw fallbackError;
+        
+        return res.json({
+          success: true,
+          data: stations || [],
+          total: stations?.length || 0
+        });
+      }
+
+      // Get detailed info for nearby stations
+      const stationIds = nearbyStations.map(s => s.station_id);
+      if (stationIds.length > 0) {
+        const { data: detailedStations, error: detailError } = await supabaseAdmin
+          .from('stations')
+          .select(`
+            station_id,
+            name,
+            address,
+            latitude,
+            longitude,
+            total_points,
+            status,
+            created_at,
+            charging_points(
+              point_id,
+              name,
+              status,
+              power_kw,
+              price_rate,
+              connector_types(
+                code,
+                name,
+                max_power_kw
+              )
+            )
+          `)
+          .in('station_id', stationIds)
+          .eq('status', 'Available');
+
+        if (detailError) throw detailError;
+
+        // Merge distance info
+        const enrichedStations = detailedStations?.map(station => {
+          const nearbyInfo = nearbyStations.find(ns => ns.station_id === station.station_id);
+          return {
+            ...station,
+            distance_km: nearbyInfo?.distance_km || null,
+            available_points: nearbyInfo?.available_points || 0
+          };
+        }) || [];
+
+        return res.json({
+          success: true,
+          data: enrichedStations,
+          total: enrichedStations.length
+        });
+      }
     }
+
+    // Regular query for all stations
+    const { data: stations, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    // Calculate available points for each station
+    const enrichedStations = stations?.map(station => ({
+      ...station,
+      available_points: station.charging_points?.filter(cp => cp.status === 'Available').length || 0
+    })) || [];
 
     res.json({
       success: true,
-      data: stations,
-      total: stations.length
+      data: enrichedStations,
+      total: enrichedStations.length
     });
   } catch (error) {
     console.error('Error fetching stations:', error);
