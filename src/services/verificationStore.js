@@ -27,6 +27,10 @@ export function isVerified(email) {
   return entry?.verified === true;
 }
 
+export function clearVerification(email) {
+  store.delete(email);
+}
+
 export function cleanupExpired() {
   const now = Date.now();
   for (const [email, entry] of store.entries()) {

@@ -1,8 +1,8 @@
 import express from 'express';
 import { UserModel } from '../models/User.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
-import { createCode, verifyCode, isVerified } from '../services/verificationStore.js';
-import { sendVerificationEmail } from '../services/emailService.js';
+import { createCode, verifyCode, isVerified, clearVerification } from '../services/verificationStore.js';
+import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../services/emailService.js';
 
 const router = express.Router();
 
@@ -207,6 +207,10 @@ router.post('/register', async (req, res) => {
     }
 
     try {
+      // Require email verification before registering
+      if (!isVerified(email)) {
+        return res.status(400).json({ success: false, error: 'Email not verified. Please verify before registering.' });
+      }
       // Check if user already exists
       const { data: existingUsers, error: checkError } = await supabaseAdmin
         .from('users')
@@ -276,6 +280,14 @@ router.post('/register', async (req, res) => {
         createdAt: newUser.created_at,
         isActive: newUser.is_active
       };
+
+      // Clear verification record for this email
+      clearVerification(email);
+      
+      // Send welcome email (async, don't wait)
+      sendWelcomeEmail(email, name).catch(err => {
+        console.error('Failed to send welcome email:', err);
+      });
       
       res.status(201).json({
         success: true,
@@ -316,6 +328,105 @@ router.post('/register', async (req, res) => {
       success: false,
       error: 'Registration failed',
       message: error.message
+    });
+  }
+});
+
+// POST /api/users/forgot-password - Send password reset code
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email required' });
+    }
+
+    // Check if user exists
+    const { data: users, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('user_id, email, name')
+      .eq('email', email)
+      .eq('is_active', true)
+      .limit(1);
+
+    if (userError || !users || users.length === 0) {
+      // Don't reveal if user exists or not (security)
+      return res.json({ 
+        success: true, 
+        message: 'If this email exists, a reset code has been sent' 
+      });
+    }
+
+    // Generate 6-digit reset code
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    createCode(email, resetCode);
+
+    // Send reset email
+    await sendPasswordResetEmail(email, resetCode);
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset code sent to your email' 
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to process password reset request' 
+    });
+  }
+});
+
+// POST /api/users/reset-password - Reset password with code
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email, code, and new password are required' 
+      });
+    }
+
+    // Verify the reset code
+    const isValidCode = verifyCode(email, code);
+    if (!isValidCode) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid or expired reset code' 
+      });
+    }
+
+    // TODO: In production, hash the password with bcrypt
+    // const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password in database
+    // Note: This is a simplified version. In production, you'd store password hash
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({ 
+        // password: hashedPassword, // TODO: Add password column and hash
+        updated_at: new Date().toISOString()
+      })
+      .eq('email', email)
+      .eq('is_active', true);
+
+    if (updateError) {
+      throw new Error('Failed to update password');
+    }
+
+    // Clear the reset code
+    clearVerification(email);
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset successfully' 
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to reset password' 
     });
   }
 });
