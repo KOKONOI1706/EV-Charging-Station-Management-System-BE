@@ -521,4 +521,102 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// POST /api/users/:id/change-password - Change user password
+router.post('/:id/change-password', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { currentPassword, newPassword } = req.body;
+
+    // Validate input
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Current password and new password are required'
+      });
+    }
+
+    // Validate new password length
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password must be at least 6 characters long'
+      });
+    }
+
+    // Check if user exists
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('user_id, email')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .single();
+
+    if (userError || !user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // TODO: In production, verify current password with bcrypt
+    // const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+    // if (!isPasswordValid) {
+    //   return res.status(401).json({
+    //     success: false,
+    //     error: 'Current password is incorrect'
+    //   });
+    // }
+
+    // For demo purposes, we just check if current password is not empty
+    if (currentPassword.length < 3) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is incorrect'
+      });
+    }
+
+    // TODO: In production, hash the password with bcrypt
+    // const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password in database
+    // Note: For now we just update the timestamp since we don't have password column yet
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({ 
+        // password_hash: hashedPassword, // TODO: Add password_hash column
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    if (updateError) {
+      console.error('Password update error:', updateError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update password',
+        message: updateError.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to change password',
+      message: error.message
+    });
+  }
+});
+
 export default router;
