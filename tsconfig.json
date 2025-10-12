@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    /* === Output folders === */
+    "rootDir": "./src",
+    "outDir": "./dist",
+
+    /* === Module system === */
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    /* === Type checking === */
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    /* === Debugging === */
+    "sourceMap": true,
+
+    /* === Declaration files === */
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}
