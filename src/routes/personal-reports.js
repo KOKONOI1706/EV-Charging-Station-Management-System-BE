@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/:userId/monthly-cost', async (req, res) => {
     try {
         // Lấy tất cả booking của user
-        const bookings = await Booking.find({ userId: req.params.userId });
+        const bookings = await Booking.getByUserId(req.params.userId);
 
         // Gom nhóm theo tháng và tính tổng chi phí, số lần sạc
         const report = {};
