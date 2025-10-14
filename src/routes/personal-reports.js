@@ -26,4 +26,4 @@ router.get('/:userId/monthly-cost', async (req, res) => {
     }
 });
 
-export default Booking;
+export default router;

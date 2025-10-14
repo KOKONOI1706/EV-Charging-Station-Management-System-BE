@@ -154,3 +154,4 @@ export class BookingModel {
     }
   }
 }
+export default BookingModel;
