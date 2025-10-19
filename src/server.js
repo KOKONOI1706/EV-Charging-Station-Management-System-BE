@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import packageRoutes from './routes/packageRoutes.js';
 
 // Import routes
 import stationRoutes from './routes/stations.js';
@@ -22,10 +23,10 @@ dotenv.config({
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration - Allow all for development
+// ✅ CORS configuration - Allow all for development
 app.use(cors());
 
-// Additional CORS headers
+// ✅ Additional CORS headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -38,22 +39,21 @@ app.use((req, res, next) => {
   }
 });
 
-// Body parsing middleware
-app.use(express.json());
+// ✅ Body parsing middleware (fix lỗi Unexpected end of JSON input)
+app.use(express.json({ strict: false }));
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
+// ✅ Routes
 app.use('/api/stations', stationRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/kv', kvStoreRoutes);
+app.use('/api/packages', packageRoutes); // ✅ Đặt trước 404 handler
 
-// Debug endpoint to test database
+// ✅ Debug endpoint to test database
 app.get('/api/debug', async (req, res) => {
   try {
     const { supabaseAdmin } = await import('./config/supabase.js');
-    
-    // Test basic query
     const { data: roles, error } = await supabaseAdmin
       .from('roles')
       .select('*');
@@ -71,7 +71,7 @@ app.get('/api/debug', async (req, res) => {
   }
 });
 
-// Test registration endpoint
+// ✅ Test registration endpoint
 app.get('/api/test-register', (req, res) => {
   const mockUser = {
     id: `user_${Date.now()}`,
@@ -91,7 +91,7 @@ app.get('/api/test-register', (req, res) => {
   });
 });
 
-// Health check endpoint
+// ✅ Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
     const healthStatus = {
@@ -104,11 +104,8 @@ app.get('/api/health', async (req, res) => {
       environment: process.env.NODE_ENV || 'development'
     };
 
-    // Try to test Supabase connection
     try {
       const { supabaseAdmin } = await import('./config/supabase.js');
-      
-      // Test simple query to check connection with real schema using admin client
       const { data, error } = await supabaseAdmin
         .from('roles')
         .select('role_id, name')
@@ -118,7 +115,6 @@ app.get('/api/health', async (req, res) => {
         healthStatus.database = 'ERROR';
         healthStatus.database_error = error.message;
         healthStatus.status = 'DEGRADED';
-        return res.status(200).json(healthStatus); // Still return 200 but with degraded status
       } else {
         healthStatus.database = 'CONNECTED';
       }
@@ -139,7 +135,7 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// 404 handler
+// ✅ 404 handler (phải đặt sau tất cả route thật)
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -147,7 +143,7 @@ app.use('*', (req, res) => {
   });
 });
 
-// Error handling middleware
+// ✅ Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
@@ -156,6 +152,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+// ✅ Server start
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);

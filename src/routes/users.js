@@ -130,14 +130,28 @@ router.post('/login', async (req, res) => {
     // For demo purposes, accept any password for existing users
     // In production, verify password hash here
     
+    // Find user's role_id
+    const { data: userRole, error: roleError } = await supabaseAdmin
+      .from('users')
+      .select(`
+        role_id
+      `)
+      .eq('user_id', user.user_id)
+      .single();
+
+    if (roleError) {
+      console.error('Error fetching role:', roleError);
+      throw new Error('Failed to fetch user role');
+    }
+
     const userResponse = {
-      id: user.user_id.toString(),
+      user_id: user.user_id,
       name: user.name,
       email: user.email,
       phone: user.phone,
-      role: user.roles.name,
-      createdAt: user.created_at,
-      isActive: user.is_active
+      role_id: userRole.role_id,
+      created_at: user.created_at,
+      is_active: user.is_active
     };
     
     res.json({
