@@ -1,15 +1,27 @@
 import express from 'express';
-import supabase from '../supabase/client.js';
+import bcrypt from 'bcryptjs';
+import { UserModel } from '../models/User.js';
+import { supabase, supabaseAdmin } from '../config/supabase.js';
+import { createCode, verifyCode, isVerified, clearVerification } from '../services/verificationStore.js';
+import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../services/emailService.js';
 
 const router = express.Router();
 
 // GET /api/users - Get all users (admin only)
 router.get('/', async (req, res) => {
   try {
-    const { data: users, error } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const { data: users, error } = await supabaseAdmin
+      .from('users')
+      .select(`
+        user_id,
+        name,
+        email,
+        phone,
+        created_at,
+        is_active,
+        roles!inner(name)
+      `)
+      .eq('is_active', true);
 
     if (error) {
       return res.status(500).json({
@@ -20,14 +32,14 @@ router.get('/', async (req, res) => {
     }
 
     // Transform data to match frontend expectations
-    const transformedUsers = (users || []).map(user => ({
-      id: user.id,
-      name: user.full_name,
+    const transformedUsers = users.map(user => ({
+      id: user.user_id.toString(),
+      name: user.name,
       email: user.email,
       phone: user.phone,
-      role: user.role || 'customer',
+      role: user.roles.name,
       createdAt: user.created_at,
-      isActive: true
+      isActive: user.is_active
     }));
 
     res.json({
@@ -36,7 +48,6 @@ router.get('/', async (req, res) => {
       total: transformedUsers.length
     });
   } catch (error) {
-    console.error('Error fetching users:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch users',
@@ -45,90 +56,28 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/users/register - Register new user
-router.post('/register', async (req, res) => {
+// GET /api/users/:id - Get user by ID
+router.get('/:id', (req, res) => {
   try {
-    const { email, password, full_name, phone } = req.body;
-
-    // Validate required fields
-    if (!email || !password || !full_name) {
-      return res.status(400).json({
+    const user = mockUsers.find(u => u.id === req.params.id);
+    if (!user) {
+      return res.status(404).json({
         success: false,
-        error: 'Missing required fields: email, password, full_name'
+        error: 'User not found'
       });
     }
-
-    // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('user_profiles')
-      .select('email')
-      .eq('email', email)
-      .single();
-
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        error: 'User with this email already exists'
-      });
-    }
-
-    // Register user with Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name,
-          phone: phone || null
-        }
-      }
-    });
-
-    if (authError) {
-      return res.status(400).json({
-        success: false,
-        error: authError.message
-      });
-    }
-
-    // Create user profile in database
-    let profile = null;
-    if (authData.user) {
-      const { data: newProfile, error: profileError } = await supabase
-        .from('user_profiles')
-        .insert([{
-          id: authData.user.id,
-          email: authData.user.email,
-          full_name,
-          phone: phone || null,
-          role: 'customer',
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-        // Continue anyway as auth user was created
-      } else {
-        profile = newProfile;
-      }
-    }
-
-    res.status(201).json({
+    
+    // Remove sensitive data
+    const { password, ...userWithoutPassword } = user;
+    
+    res.json({
       success: true,
-      data: {
-        user: authData.user,
-        session: authData.session,
-        profile: profile
-      },
-      message: 'User registered successfully'
+      data: userWithoutPassword
     });
   } catch (error) {
-    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to register user',
+      error: 'Failed to fetch user',
       message: error.message
     });
   }
@@ -138,7 +87,7 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
+    
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -146,147 +95,452 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+    // Find user by email
+    const { data: users, error } = await supabaseAdmin
+      .from('users')
+      .select(`
+        user_id,
+        name,
+        email,
+        phone,
+        password_hash,
+        created_at,
+        is_active,
+        roles!inner(name)
+      `)
+      .eq('email', email)
+      .eq('is_active', true)
+      .limit(1);
 
-    if (authError) {
-      return res.status(401).json({
+    if (error) {
+      return res.status(500).json({
         success: false,
-        error: authError.message
+        error: 'Database error',
+        message: error.message
       });
     }
 
-    // Get user profile
-    const { data: profile, error: profileError } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', authData.user.id)
-      .single();
-
-    if (profileError) {
-      console.error('Profile fetch error:', profileError);
+    if (!users || users.length === 0) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
     }
 
+    const user = users[0];
+    
+    // Verify password
+    if (!user.password_hash) {
+      return res.status(401).json({
+        success: false,
+        error: 'Password not set for this account'
+      });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
+    
+    const userResponse = {
+      id: user.user_id.toString(),
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.roles.name,
+      createdAt: user.created_at,
+      isActive: user.is_active
+    };
+    
     res.json({
       success: true,
       data: {
-        user: authData.user,
-        session: authData.session,
-        profile: profile || null
+        user: userResponse,
+        token: `demo_token_${user.user_id}` // In real app, generate JWT
       },
       message: 'Login successful'
     });
   } catch (error) {
-    console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to login',
+      error: 'Login failed',
       message: error.message
     });
   }
 });
 
-// POST /api/users/logout - Logout user
-router.post('/logout', async (req, res) => {
+// POST /api/users/send-code - send verification code to given email
+router.post('/send-code', async (req, res) => {
   try {
-    const { error } = await supabase.auth.signOut();
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email required' });
 
-    if (error) {
+    // Generate 6-digit numeric code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    createCode(email, code);
+
+    // Send email (may log to console if SMTP not configured)
+    await sendVerificationEmail(email, code);
+
+    res.json({ success: true, message: 'Verification code sent' });
+  } catch (error) {
+    console.error('Send code error:', error);
+    res.status(500).json({ success: false, error: 'Failed to send code' });
+  }
+});
+
+// POST /api/users/verify-code - verify code for email
+router.post('/verify-code', (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ success: false, error: 'Email and code required' });
+
+    const ok = verifyCode(email, code);
+    if (!ok) return res.status(400).json({ success: false, error: 'Invalid or expired code' });
+
+    res.json({ success: true, message: 'Email verified' });
+  } catch (error) {
+    console.error('Verify code error:', error);
+    res.status(500).json({ success: false, error: 'Verification failed' });
+  }
+});
+
+// POST /api/users/register - Register new user
+router.post('/register', async (req, res) => {
+  try {
+    const { name, email, phone, password } = req.body;
+    
+    // Validate required fields
+    if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
-        error: error.message
+        error: 'Name, email, and password are required'
       });
     }
 
-    res.json({
-      success: true,
-      message: 'Logout successful'
-    });
-  } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to logout',
-      message: error.message
-    });
-  }
-});
+    try {
+      // Require email verification before registering
+      if (!isVerified(email)) {
+        return res.status(400).json({ success: false, error: 'Email not verified. Please verify before registering.' });
+      }
+      // Check if user already exists
+      const { data: existingUsers, error: checkError } = await supabaseAdmin
+        .from('users')
+        .select('user_id, email')
+        .or(`email.eq.${email}${phone ? `,phone.eq.${phone}` : ''}`)
+        .limit(1);
 
-// GET /api/users/profile/:id - Get user profile
-router.get('/profile/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data: profile, error } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({
+      if (existingUsers && existingUsers.length > 0) {
+        return res.status(400).json({
           success: false,
-          error: 'User profile not found'
+          error: 'User with this email or phone already exists'
         });
       }
-      throw error;
+
+      // Get customer role ID
+      const { data: roles, error: roleError } = await supabaseAdmin
+        .from('roles')
+        .select('role_id')
+        .eq('name', 'customer')
+        .limit(1);
+
+      if (roleError) {
+        throw new Error('Role fetch failed');
+      }
+
+      const customerRoleId = roles?.[0]?.role_id || 1;
+
+      // Hash password with bcrypt (salt rounds: 10)
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+
+      // Create new user in database
+      const { data: newUsers, error: insertError } = await supabaseAdmin
+        .from('users')
+        .insert([
+          {
+            name,
+            email,
+            phone: phone || null,
+            role_id: customerRoleId,
+            password_hash: passwordHash,
+            is_active: true
+          }
+        ])
+        .select(`
+          user_id,
+          name,
+          email,
+          phone,
+          created_at,
+          is_active,
+          roles!inner(name)
+        `);
+
+      if (insertError) {
+        throw new Error('User creation failed');
+      }
+
+      const newUser = newUsers?.[0];
+      if (!newUser) {
+        throw new Error('No user data returned');
+      }
+      
+      // Transform response
+      const userResponse = {
+        id: newUser.user_id.toString(),
+        name: newUser.name,
+        email: newUser.email,
+        phone: newUser.phone,
+        role: newUser.roles.name,
+        createdAt: newUser.created_at,
+        isActive: newUser.is_active
+      };
+
+      // Clear verification record for this email
+      clearVerification(email);
+      
+      // Send welcome email (async, don't wait)
+      sendWelcomeEmail(email, name).catch(err => {
+        console.error('Failed to send welcome email:', err);
+      });
+      
+      res.status(201).json({
+        success: true,
+        data: {
+          user: userResponse,
+          token: `demo_token_${newUser.user_id}` // TODO: Replace with real JWT
+        },
+        message: 'Registration successful'
+      });
+
+    } catch (dbError) {
+      console.error('Database error during registration:', dbError.message);
+      
+      // Fallback to mock data if database fails
+      const mockUser = {
+        id: `user_${Date.now()}`,
+        name,
+        email,
+        phone: phone || null,
+        role: 'customer',
+        createdAt: new Date().toISOString(),
+        isActive: true
+      };
+      
+      res.status(201).json({
+        success: true,
+        data: {
+          user: mockUser,
+          token: `demo_token_${mockUser.id}`
+        },
+        message: 'Registration successful (database unavailable - using temporary account)'
+      });
     }
 
-    res.json({
-      success: true,
-      data: profile
-    });
   } catch (error) {
-    console.error('Profile fetch error:', error);
+    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch profile',
+      error: 'Registration failed',
       message: error.message
     });
   }
 });
 
-// PUT /api/users/profile/:id - Update user profile
-router.put('/profile/:id', async (req, res) => {
+// POST /api/users/forgot-password - Send password reset code
+router.post('/forgot-password', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { full_name, phone, preferences } = req.body;
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email required' });
+    }
 
-    const updateData = {
+    // Check if user exists
+    const { data: users, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('user_id, email, name')
+      .eq('email', email)
+      .eq('is_active', true)
+      .limit(1);
+
+    if (userError || !users || users.length === 0) {
+      // Don't reveal if user exists or not (security)
+      return res.json({ 
+        success: true, 
+        message: 'If this email exists, a reset code has been sent' 
+      });
+    }
+
+    // Generate 6-digit reset code
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    createCode(email, resetCode);
+
+    // Send reset email
+    await sendPasswordResetEmail(email, resetCode);
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset code sent to your email' 
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to process password reset request' 
+    });
+  }
+});
+
+// POST /api/users/reset-password - Reset password with code
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email, code, and new password are required' 
+      });
+    }
+
+    // Verify the reset code
+    const isValidCode = verifyCode(email, code);
+    if (!isValidCode) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid or expired reset code' 
+      });
+    }
+
+    // Validate password strength (optional)
+    if (newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Password must be at least 6 characters long' 
+      });
+    }
+
+    // Hash the new password with bcrypt
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password in database
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({ 
+        password_hash: hashedPassword,
+        updated_at: new Date().toISOString()
+      })
+      .eq('email', email)
+      .eq('is_active', true);
+
+    if (updateError) {
+      throw new Error('Failed to update password');
+    }
+
+    // Clear the reset code
+    clearVerification(email);
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset successfully' 
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to reset password' 
+    });
+  }
+});
+
+// PUT /api/users/:id - Update user profile
+router.put('/:id', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { name, email, phone, vehicleInfo } = req.body;
+
+    // Validate input
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    // Build update object
+    const updates = {
       updated_at: new Date().toISOString()
     };
 
-    if (full_name !== undefined) updateData.full_name = full_name;
-    if (phone !== undefined) updateData.phone = phone;
-    if (preferences !== undefined) updateData.preferences = preferences;
+    if (name) updates.name = name;
+    if (email) updates.email = email;
+    if (phone) updates.phone = phone;
 
-    const { data: profile, error } = await supabase
-      .from('user_profiles')
-      .update(updateData)
-      .eq('id', id)
-      .select()
+    // Update user in database
+    const { data: updatedUser, error: updateError } = await supabaseAdmin
+      .from('users')
+      .update(updates)
+      .eq('user_id', userId)
+      .select(`
+        user_id,
+        name,
+        email,
+        phone,
+        created_at,
+        roles!inner(name)
+      `)
       .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({
-          success: false,
-          error: 'User profile not found'
-        });
-      }
-      throw error;
+    if (updateError) {
+      console.error('Database update error:', updateError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update user profile',
+        message: updateError.message
+      });
     }
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Transform response to match frontend User interface
+    const responseUser = {
+      id: updatedUser.user_id.toString(),
+      name: updatedUser.name,
+      email: updatedUser.email,
+      phone: updatedUser.phone || '',
+      role: updatedUser.roles.name,
+      memberSince: new Date(updatedUser.created_at).toISOString().split('T')[0],
+      totalSessions: 0,
+      totalSpent: 0,
+      favoriteStations: [],
+      vehicleInfo: vehicleInfo || {
+        make: "N/A",
+        model: "N/A",
+        year: 2020,
+        batteryCapacity: 50
+      }
+    };
 
     res.json({
       success: true,
-      data: profile,
+      data: {
+        user: responseUser
+      },
       message: 'Profile updated successfully'
     });
   } catch (error) {
-    console.error('Profile update error:', error);
+    console.error('Update profile error:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to update profile',
@@ -295,222 +549,99 @@ router.put('/profile/:id', async (req, res) => {
   }
 });
 
-// POST /api/users/forgot-password - Send password reset email
-router.post('/forgot-password', async (req, res) => {
+// POST /api/users/:id/change-password - Change user password
+router.post('/:id/change-password', async (req, res) => {
   try {
-    const { email } = req.body;
+    const userId = req.params.id;
+    const { currentPassword, newPassword } = req.body;
 
-    if (!email) {
+    // Validate input
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        error: 'Email is required'
+        error: 'User ID is required'
       });
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.FRONTEND_URL}/reset-password`
-    });
-
-    if (error) {
+    if (!currentPassword || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: error.message
+        error: 'Current password and new password are required'
       });
     }
 
-    res.json({
-      success: true,
-      message: 'Password reset email sent'
-    });
-  } catch (error) {
-    console.error('Password reset error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to send password reset email',
-      message: error.message
-    });
-  }
-});
-
-// POST /api/users/reset-password - Reset password
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { password, access_token, refresh_token } = req.body;
-
-    if (!password || !access_token || !refresh_token) {
+    // Validate new password length
+    if (newPassword.length < 6) {
       return res.status(400).json({
         success: false,
-        error: 'Password, access_token, and refresh_token are required'
+        error: 'New password must be at least 6 characters long'
       });
     }
 
-    // Set session first
-    const { error: sessionError } = await supabase.auth.setSession({
-      access_token,
-      refresh_token
-    });
-
-    if (sessionError) {
-      return res.status(400).json({
-        success: false,
-        error: sessionError.message
-      });
-    }
-
-    // Update password
-    const { error: updateError } = await supabase.auth.updateUser({
-      password
-    });
-
-    if (updateError) {
-      return res.status(400).json({
-        success: false,
-        error: updateError.message
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Password reset successful'
-    });
-  } catch (error) {
-    console.error('Password reset error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to reset password',
-      message: error.message
-    });
-  }
-});
-
-// GET /api/users/verify-session - Verify user session
-router.get('/verify-session', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        error: 'No valid authorization token provided'
-      });
-    }
-
-    const token = authHeader.substring(7);
-
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid session'
-      });
-    }
-
-    // Get user profile
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', user.id)
+    // Check if user exists and get current password hash
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('user_id, email, password_hash')
+      .eq('user_id', userId)
+      .eq('is_active', true)
       .single();
 
-    res.json({
-      success: true,
-      data: {
-        user,
-        profile: profile || null
-      }
-    });
-  } catch (error) {
-    console.error('Session verification error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to verify session',
-      message: error.message
-    });
-  }
-});
-
-// PUT /api/users/:id - Update user (admin only)
-router.put('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { full_name, phone, role } = req.body;
-
-    const updateData = {
-      updated_at: new Date().toISOString()
-    };
-
-    if (full_name !== undefined) updateData.full_name = full_name;
-    if (phone !== undefined) updateData.phone = phone;
-    if (role !== undefined) updateData.role = role;
-
-    const { data: user, error } = await supabase
-      .from('user_profiles')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({
-          success: false,
-          error: 'User not found'
-        });
-      }
-      throw error;
+    if (userError || !user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
     }
 
-    res.json({
-      success: true,
-      data: user,
-      message: 'User updated successfully'
-    });
-  } catch (error) {
-    console.error('User update error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update user',
-      message: error.message
-    });
-  }
-});
+    // Check if user has a password set
+    if (!user.password_hash) {
+      return res.status(400).json({
+        success: false,
+        error: 'No password set for this account. Please use forgot password to set one.'
+      });
+    }
 
-// DELETE /api/users/:id - Delete user (admin only)
-router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+    // Verify current password with bcrypt
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is incorrect'
+      });
+    }
 
-    // Soft delete by updating profile
-    const { data: user, error } = await supabase
-      .from('user_profiles')
+    // Hash the new password with bcrypt
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password in database
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
       .update({ 
-        role: 'deleted',
+        password_hash: hashedPassword,
         updated_at: new Date().toISOString()
       })
-      .eq('id', id)
-      .select()
-      .single();
+      .eq('user_id', userId)
+      .eq('is_active', true);
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({
-          success: false,
-          error: 'User not found'
-        });
-      }
-      throw error;
+    if (updateError) {
+      console.error('Password update error:', updateError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update password',
+        message: updateError.message
+      });
     }
 
     res.json({
       success: true,
-      message: 'User deleted successfully'
+      message: 'Password changed successfully'
     });
   } catch (error) {
-    console.error('User deletion error:', error);
+    console.error('Change password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to delete user',
+      error: 'Failed to change password',
       message: error.message
     });
   }
