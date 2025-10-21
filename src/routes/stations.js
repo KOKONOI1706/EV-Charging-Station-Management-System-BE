@@ -3,22 +3,57 @@ import supabase from '../supabase/client.js';
 
 const router = express.Router();
 
-// GET /api/stations - Get all stations
+// GET /api/stations - Get all stations with optional location filtering
 router.get('/', async (req, res) => {
   try {
-    const { data: stations, error } = await supabase
+    const { lat, lng, radius } = req.query;
+    
+    // Base query for all stations
+    let query = supabase
       .from('stations')
       .select('*')
       .order('name');
+
+    const { data: stations, error } = await query;
 
     if (error) {
       throw error;
     }
 
+    // Calculate distances and filter if location provided
+    let enrichedStations = stations || [];
+    
+    if (lat && lng && stations) {
+      const userLat = parseFloat(lat);
+      const userLng = parseFloat(lng);
+      const maxRadius = radius ? parseFloat(radius) : 50; // Default 50 km radius
+
+      enrichedStations = stations.map(station => {
+        const distance = calculateDistance(
+          userLat, 
+          userLng, 
+          station.lat || station.latitude, 
+          station.lng || station.longitude
+        );
+        return {
+          ...station,
+          distance_km: parseFloat(distance.toFixed(2))
+        };
+      });
+
+      // Filter by radius
+      enrichedStations = enrichedStations.filter(
+        station => station.distance_km <= maxRadius
+      );
+
+      // Sort by distance
+      enrichedStations.sort((a, b) => a.distance_km - b.distance_km);
+    }
+
     res.json({
       success: true,
-      data: stations,
-      total: stations.length
+      data: enrichedStations,
+      total: enrichedStations.length
     });
   } catch (error) {
     console.error('Error fetching stations:', error);
@@ -60,6 +95,40 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch station',
+      message: error.message
+    });
+  }
+});
+
+// POST /api/stations - Create new station (admin only)
+router.post('/', async (req, res) => {
+  try {
+    const stationData = {
+      ...req.body,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    const { data: newStation, error } = await supabase
+      .from('stations')
+      .insert([stationData])
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+    
+    res.status(201).json({
+      success: true,
+      data: newStation,
+      message: 'Station created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating station:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create station',
       message: error.message
     });
   }
@@ -110,30 +179,30 @@ router.post('/search', async (req, res) => {
     }
 
     // Calculate distances if location provided
-    let stationsWithDistance = stations;
+    let stationsWithDistance = stations || [];
     if (location && location.lat && location.lng) {
       stationsWithDistance = stations.map(station => {
         const distance = calculateDistance(
           location.lat, 
           location.lng, 
-          station.lat, 
-          station.lng
+          station.lat || station.latitude, 
+          station.lng || station.longitude
         );
         return {
           ...station,
-          distance: parseFloat(distance.toFixed(2))
+          distance_km: parseFloat(distance.toFixed(2))
         };
       });
 
       // Apply distance filter if specified
       if (filters.maxDistance) {
         stationsWithDistance = stationsWithDistance.filter(
-          station => station.distance <= filters.maxDistance
+          station => station.distance_km <= filters.maxDistance
         );
       }
 
       // Sort by distance
-      stationsWithDistance.sort((a, b) => a.distance - b.distance);
+      stationsWithDistance.sort((a, b) => a.distance_km - b.distance_km);
     }
 
     res.json({
@@ -154,6 +223,47 @@ router.post('/search', async (req, res) => {
   }
 });
 
+// PUT /api/stations/:id - Update station (admin only)
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = {
+      ...req.body,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: updatedStation, error } = await supabase
+      .from('stations')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'Station not found'
+        });
+      }
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      data: updatedStation,
+      message: 'Station updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating station:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update station',
+      message: error.message
+    });
+  }
+});
+
 // PUT /api/stations/:id/availability - Update station availability
 router.put('/:id/availability', async (req, res) => {
   try {
@@ -168,6 +278,12 @@ router.put('/:id/availability', async (req, res) => {
       .single();
 
     if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'Station not found'
+        });
+      }
       throw fetchError;
     }
 
@@ -205,9 +321,37 @@ router.put('/:id/availability', async (req, res) => {
   }
 });
 
-// Helper function to calculate distance between two points
+// DELETE /api/stations/:id - Delete station (admin only)
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from('stations')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      message: 'Station deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting station:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete station',
+      message: error.message
+    });
+  }
+});
+
+// Helper function to calculate distance between two points (in kilometers)
 function calculateDistance(lat1, lng1, lat2, lng2) {
-  const R = 3959; // Earth's radius in miles
+  const R = 6371; // Earth's radius in kilometers
   const dLat = deg2rad(lat2 - lat1);
   const dLng = deg2rad(lng2 - lng1);
   const a =

@@ -3,6 +3,48 @@ import supabase from '../supabase/client.js';
 
 const router = express.Router();
 
+// GET /api/users - Get all users (admin only)
+router.get('/', async (req, res) => {
+  try {
+    const { data: users, error } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        error: 'Database error',
+        message: error.message
+      });
+    }
+
+    // Transform data to match frontend expectations
+    const transformedUsers = (users || []).map(user => ({
+      id: user.id,
+      name: user.full_name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role || 'customer',
+      createdAt: user.created_at,
+      isActive: true
+    }));
+
+    res.json({
+      success: true,
+      data: transformedUsers,
+      total: transformedUsers.length
+    });
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch users',
+      message: error.message
+    });
+  }
+});
+
 // POST /api/users/register - Register new user
 router.post('/register', async (req, res) => {
   try {
@@ -13,6 +55,20 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: email, password, full_name'
+      });
+    }
+
+    // Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('user_profiles')
+      .select('email')
+      .eq('email', email)
+      .single();
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'User with this email already exists'
       });
     }
 
@@ -36,8 +92,9 @@ router.post('/register', async (req, res) => {
     }
 
     // Create user profile in database
+    let profile = null;
     if (authData.user) {
-      const { data: profile, error: profileError } = await supabase
+      const { data: newProfile, error: profileError } = await supabase
         .from('user_profiles')
         .insert([{
           id: authData.user.id,
@@ -53,6 +110,8 @@ router.post('/register', async (req, res) => {
       if (profileError) {
         console.error('Profile creation error:', profileError);
         // Continue anyway as auth user was created
+      } else {
+        profile = newProfile;
       }
     }
 
@@ -60,7 +119,8 @@ router.post('/register', async (req, res) => {
       success: true,
       data: {
         user: authData.user,
-        session: authData.session
+        session: authData.session,
+        profile: profile
       },
       message: 'User registered successfully'
     });
@@ -211,6 +271,12 @@ router.put('/profile/:id', async (req, res) => {
       .single();
 
     if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'User profile not found'
+        });
+      }
       throw error;
     }
 
@@ -359,6 +425,92 @@ router.get('/verify-session', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to verify session',
+      message: error.message
+    });
+  }
+});
+
+// PUT /api/users/:id - Update user (admin only)
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { full_name, phone, role } = req.body;
+
+    const updateData = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (full_name !== undefined) updateData.full_name = full_name;
+    if (phone !== undefined) updateData.phone = phone;
+    if (role !== undefined) updateData.role = role;
+
+    const { data: user, error } = await supabase
+      .from('user_profiles')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found'
+        });
+      }
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      data: user,
+      message: 'User updated successfully'
+    });
+  } catch (error) {
+    console.error('User update error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update user',
+      message: error.message
+    });
+  }
+});
+
+// DELETE /api/users/:id - Delete user (admin only)
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Soft delete by updating profile
+    const { data: user, error } = await supabase
+      .from('user_profiles')
+      .update({ 
+        role: 'deleted',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found'
+        });
+      }
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      message: 'User deleted successfully'
+    });
+  } catch (error) {
+    console.error('User deletion error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete user',
       message: error.message
     });
   }
