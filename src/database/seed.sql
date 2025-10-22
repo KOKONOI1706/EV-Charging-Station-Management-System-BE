@@ -25,12 +25,14 @@ INSERT INTO payment_methods (code, name) VALUES
 ('ZALOPAY', 'ZaloPay');
 
 -- Insert sample users
-INSERT INTO users (name, email, phone, role_id) VALUES
-('Nguyen Van Driver', 'driver@example.com', '+84123456789', 1),
-('Tran Thi Manager', 'manager@evcharging.com', '+84123456790', 2),
-('Le Van Admin', 'admin@evcharging.com', '+84123456791', 3),
-('Pham Thi Customer', 'customer@email.com', '+84123456792', 1),
-('Hoang Van User', 'user@email.com', '+84123456793', 1);
+-- Default password for all users: "123456"
+-- Bcrypt hash (salt rounds: 10): $2b$10$Slc4BYDuH6MfW0P27OQlSOPuKXNrV/PQmUIXI0979nh2RBwzZO0dq
+INSERT INTO users (name, email, phone, role_id, password_hash) VALUES
+('Nguyen Van Driver', 'driver@example.com', '+84123456789', 1, '$2b$10$Slc4BYDuH6MfW0P27OQlSOPuKXNrV/PQmUIXI0979nh2RBwzZO0dq'),
+('Tran Thi Manager', 'manager@evcharging.com', '+84123456790', 2, '$2b$10$Slc4BYDuH6MfW0P27OQlSOPuKXNrV/PQmUIXI0979nh2RBwzZO0dq'),
+('Le Van Admin', 'admin@evcharging.com', '+84123456791', 3, '$2b$10$Slc4BYDuH6MfW0P27OQlSOPuKXNrV/PQmUIXI0979nh2RBwzZO0dq'),
+('Pham Thi Customer', 'customer@email.com', '+84123456792', 1, '$2b$10$Slc4BYDuH6MfW0P27OQlSOPuKXNrV/PQmUIXI0979nh2RBwzZO0dq'),
+('Hoang Van User', 'user@email.com', '+84123456793', 1, '$2b$10$Slc4BYDuH6MfW0P27OQlSOPuKXNrV/PQmUIXI0979nh2RBwzZO0dq');
 
 -- Insert sample vehicles
 INSERT INTO vehicles (user_id, plate_number, battery_capacity_kwh, connector_type_id) VALUES

@@ -1,4 +1,6 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
+import { UserModel } from '../models/User.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { createCode, verifyCode, isVerified, clearVerification } from '../services/verificationStore.js';
 import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../services/emailService.js';
@@ -11,7 +13,13 @@ router.get('/', async (req, res) => {
     const { data: users, error } = await supabaseAdmin
       .from('users')
       .select(`
-        *
+        user_id,
+        name,
+        email,
+        phone,
+        created_at,
+        is_active,
+        roles!inner(name)
       `)
       .eq('is_active', true);
 
@@ -95,6 +103,7 @@ router.post('/login', async (req, res) => {
         name,
         email,
         phone,
+        password_hash,
         created_at,
         is_active,
         roles!inner(name)
@@ -120,31 +129,31 @@ router.post('/login', async (req, res) => {
 
     const user = users[0];
     
-    // For demo purposes, accept any password for existing users
-    // In production, verify password hash here
-    
-    // Find user's role_id
-    const { data: userRole, error: roleError } = await supabaseAdmin
-      .from('users')
-      .select(`
-        role_id
-      `)
-      .eq('user_id', user.user_id)
-      .single();
-
-    if (roleError) {
-      console.error('Error fetching role:', roleError);
-      throw new Error('Failed to fetch user role');
+    // Verify password
+    if (!user.password_hash) {
+      return res.status(401).json({
+        success: false,
+        error: 'Password not set for this account'
+      });
     }
 
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
+    
     const userResponse = {
-      user_id: user.user_id,
+      id: user.user_id.toString(),
       name: user.name,
       email: user.email,
       phone: user.phone,
-      role_id: userRole.role_id,
-      created_at: user.created_at,
-      is_active: user.is_active
+      role: user.roles.name,
+      createdAt: user.created_at,
+      isActive: user.is_active
     };
     
     res.json({
@@ -203,69 +212,141 @@ router.post('/verify-code', (req, res) => {
 // POST /api/users/register - Register new user
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, full_name} = req.body;
-
+    const { name, email, phone, password } = req.body;
+    
     // Validate required fields
-    if (!email || !password || !full_name) {
+    if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: email, password, full_name'
+        error: 'Name, email, and password are required'
       });
     }
 
-    // Register user with Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name,
-          phone: phone || null
-        }
+    try {
+      // Require email verification before registering
+      if (!isVerified(email)) {
+        return res.status(400).json({ success: false, error: 'Email not verified. Please verify before registering.' });
       }
-    });
-
-    if (authError) {
-      return res.status(400).json({
-        success: false,
-        error: authError.message
-      });
-    }
-
-    // Create user profile in database
-    if (authData.user) {
-      const { data: profile, error: profileError } = await supabase
+      // Check if user already exists
+      const { data: existingUsers, error: checkError } = await supabaseAdmin
         .from('users')
-        .insert([{
-          id: authData.user.id,
-          email: authData.user.email,
-          full_name,
-          phone: phone || null,
-          role: 'customer',
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
+        .select('user_id, email')
+        .or(`email.eq.${email}${phone ? `,phone.eq.${phone}` : ''}`)
+        .limit(1);
 
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-        // Continue anyway as auth user was created
+      if (existingUsers && existingUsers.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'User with this email or phone already exists'
+        });
       }
+
+      // Get customer role ID
+      const { data: roles, error: roleError } = await supabaseAdmin
+        .from('roles')
+        .select('role_id')
+        .eq('name', 'customer')
+        .limit(1);
+
+      if (roleError) {
+        throw new Error('Role fetch failed');
+      }
+
+      const customerRoleId = roles?.[0]?.role_id || 1;
+
+      // Hash password with bcrypt (salt rounds: 10)
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+
+      // Create new user in database
+      const { data: newUsers, error: insertError } = await supabaseAdmin
+        .from('users')
+        .insert([
+          {
+            name,
+            email,
+            phone: phone || null,
+            role_id: customerRoleId,
+            password_hash: passwordHash,
+            is_active: true
+          }
+        ])
+        .select(`
+          user_id,
+          name,
+          email,
+          phone,
+          created_at,
+          is_active,
+          roles!inner(name)
+        `);
+
+      if (insertError) {
+        throw new Error('User creation failed');
+      }
+
+      const newUser = newUsers?.[0];
+      if (!newUser) {
+        throw new Error('No user data returned');
+      }
+      
+      // Transform response
+      const userResponse = {
+        id: newUser.user_id.toString(),
+        name: newUser.name,
+        email: newUser.email,
+        phone: newUser.phone,
+        role: newUser.roles.name,
+        createdAt: newUser.created_at,
+        isActive: newUser.is_active
+      };
+
+      // Clear verification record for this email
+      clearVerification(email);
+      
+      // Send welcome email (async, don't wait)
+      sendWelcomeEmail(email, name).catch(err => {
+        console.error('Failed to send welcome email:', err);
+      });
+      
+      res.status(201).json({
+        success: true,
+        data: {
+          user: userResponse,
+          token: `demo_token_${newUser.user_id}` // TODO: Replace with real JWT
+        },
+        message: 'Registration successful'
+      });
+
+    } catch (dbError) {
+      console.error('Database error during registration:', dbError.message);
+      
+      // Fallback to mock data if database fails
+      const mockUser = {
+        id: `user_${Date.now()}`,
+        name,
+        email,
+        phone: phone || null,
+        role: 'customer',
+        createdAt: new Date().toISOString(),
+        isActive: true
+      };
+      
+      res.status(201).json({
+        success: true,
+        data: {
+          user: mockUser,
+          token: `demo_token_${mockUser.id}`
+        },
+        message: 'Registration successful (database unavailable - using temporary account)'
+      });
     }
 
-    res.status(201).json({
-      success: true,
-      data: {
-        user: authData.user,
-        session: authData.session
-      },
-      message: 'User registered successfully'
-    });
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to register user',
+      error: 'Registration failed',
       message: error.message
     });
   }
@@ -336,15 +417,23 @@ router.post('/reset-password', async (req, res) => {
       });
     }
 
-    // TODO: In production, hash the password with bcrypt
-    // const hashedPassword = await bcrypt.hash(newPassword, 10);
+    // Validate password strength (optional)
+    if (newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Password must be at least 6 characters long' 
+      });
+    }
+
+    // Hash the new password with bcrypt
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
     // Update password in database
-    // Note: This is a simplified version. In production, you'd store password hash
     const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({ 
-        // password: hashedPassword, // TODO: Add password column and hash
+        password_hash: hashedPassword,
         updated_at: new Date().toISOString()
       })
       .eq('email', email)
@@ -489,10 +578,10 @@ router.post('/:id/change-password', async (req, res) => {
       });
     }
 
-    // Check if user exists
+    // Check if user exists and get current password hash
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
-      .select('user_id, email')
+      .select('user_id, email, password_hash')
       .eq('user_id', userId)
       .eq('is_active', true)
       .single();
@@ -504,32 +593,32 @@ router.post('/:id/change-password', async (req, res) => {
       });
     }
 
-    // TODO: In production, verify current password with bcrypt
-    // const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
-    // if (!isPasswordValid) {
-    //   return res.status(401).json({
-    //     success: false,
-    //     error: 'Current password is incorrect'
-    //   });
-    // }
+    // Check if user has a password set
+    if (!user.password_hash) {
+      return res.status(400).json({
+        success: false,
+        error: 'No password set for this account. Please use forgot password to set one.'
+      });
+    }
 
-    // For demo purposes, we just check if current password is not empty
-    if (currentPassword.length < 3) {
+    // Verify current password with bcrypt
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
         error: 'Current password is incorrect'
       });
     }
 
-    // TODO: In production, hash the password with bcrypt
-    // const hashedPassword = await bcrypt.hash(newPassword, 10);
+    // Hash the new password with bcrypt
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
     // Update password in database
-    // Note: For now we just update the timestamp since we don't have password column yet
     const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({ 
-        // password_hash: hashedPassword, // TODO: Add password_hash column
+        password_hash: hashedPassword,
         updated_at: new Date().toISOString()
       })
       .eq('user_id', userId)
