@@ -1,4 +1,5 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import { UserModel } from '../models/User.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { createCode, verifyCode, isVerified, clearVerification } from '../services/verificationStore.js';
@@ -102,6 +103,7 @@ router.post('/login', async (req, res) => {
         name,
         email,
         phone,
+        password_hash,
         created_at,
         is_active,
         roles!inner(name)
@@ -127,8 +129,22 @@ router.post('/login', async (req, res) => {
 
     const user = users[0];
     
-    // For demo purposes, accept any password for existing users
-    // In production, verify password hash here
+    // Verify password
+    if (!user.password_hash) {
+      return res.status(401).json({
+        success: false,
+        error: 'Password not set for this account'
+      });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
     
     // Find user's role_id
     const { data: userRole, error: roleError } = await supabaseAdmin
@@ -252,8 +268,11 @@ router.post('/register', async (req, res) => {
 
       const customerRoleId = roles?.[0]?.role_id || 1;
 
+      // Hash password with bcrypt (salt rounds: 10)
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+
       // Create new user in database
-      // TODO: Hash password with bcrypt before storing in production
       const { data: newUsers, error: insertError } = await supabaseAdmin
         .from('users')
         .insert([
@@ -262,6 +281,7 @@ router.post('/register', async (req, res) => {
             email,
             phone: phone || null,
             role_id: customerRoleId,
+            password_hash: passwordHash,
             is_active: true
           }
         ])
@@ -411,15 +431,23 @@ router.post('/reset-password', async (req, res) => {
       });
     }
 
-    // TODO: In production, hash the password with bcrypt
-    // const hashedPassword = await bcrypt.hash(newPassword, 10);
+    // Validate password strength (optional)
+    if (newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Password must be at least 6 characters long' 
+      });
+    }
+
+    // Hash the new password with bcrypt
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
     // Update password in database
-    // Note: This is a simplified version. In production, you'd store password hash
     const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({ 
-        // password: hashedPassword, // TODO: Add password column and hash
+        password_hash: hashedPassword,
         updated_at: new Date().toISOString()
       })
       .eq('email', email)
@@ -564,10 +592,10 @@ router.post('/:id/change-password', async (req, res) => {
       });
     }
 
-    // Check if user exists
+    // Check if user exists and get current password hash
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
-      .select('user_id, email')
+      .select('user_id, email, password_hash')
       .eq('user_id', userId)
       .eq('is_active', true)
       .single();
@@ -579,32 +607,32 @@ router.post('/:id/change-password', async (req, res) => {
       });
     }
 
-    // TODO: In production, verify current password with bcrypt
-    // const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
-    // if (!isPasswordValid) {
-    //   return res.status(401).json({
-    //     success: false,
-    //     error: 'Current password is incorrect'
-    //   });
-    // }
+    // Check if user has a password set
+    if (!user.password_hash) {
+      return res.status(400).json({
+        success: false,
+        error: 'No password set for this account. Please use forgot password to set one.'
+      });
+    }
 
-    // For demo purposes, we just check if current password is not empty
-    if (currentPassword.length < 3) {
+    // Verify current password with bcrypt
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
         error: 'Current password is incorrect'
       });
     }
 
-    // TODO: In production, hash the password with bcrypt
-    // const hashedPassword = await bcrypt.hash(newPassword, 10);
+    // Hash the new password with bcrypt
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
     // Update password in database
-    // Note: For now we just update the timestamp since we don't have password column yet
     const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({ 
-        // password_hash: hashedPassword, // TODO: Add password_hash column
+        password_hash: hashedPassword,
         updated_at: new Date().toISOString()
       })
       .eq('user_id', userId)
