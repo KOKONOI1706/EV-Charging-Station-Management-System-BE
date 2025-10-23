@@ -3,9 +3,10 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import packageRoutes from './routes/packageRoutes.js';
 
 // Import routes
+import packageRoutes from './routes/packageRoutes.js';
+import purchaseRoutes from './routes/purchaseRoutes.js';
 import stationRoutes from './routes/stations.js';
 import bookingRoutes from './routes/bookings.js';
 import userRoutes from './routes/users.js';
@@ -23,10 +24,8 @@ dotenv.config({
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ✅ CORS configuration - Allow all for development
+// ✅ CORS configuration
 app.use(cors());
-
-// ✅ Additional CORS headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -39,7 +38,7 @@ app.use((req, res, next) => {
   }
 });
 
-// ✅ Body parsing middleware (fix lỗi Unexpected end of JSON input)
+// ✅ Body parser
 app.use(express.json({ strict: false }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -48,9 +47,10 @@ app.use('/api/stations', stationRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/kv', kvStoreRoutes);
-app.use('/api/packages', packageRoutes); // ✅ Đặt trước 404 handler
+app.use('/api/packages', packageRoutes);
+app.use('/api/purchase', purchaseRoutes); // ✅ ADD HERE (after packages)
 
-// ✅ Debug endpoint to test database
+// ✅ Debug & health routes
 app.get('/api/debug', async (req, res) => {
   try {
     const { supabaseAdmin } = await import('./config/supabase.js');
@@ -71,7 +71,6 @@ app.get('/api/debug', async (req, res) => {
   }
 });
 
-// ✅ Test registration endpoint
 app.get('/api/test-register', (req, res) => {
   const mockUser = {
     id: `user_${Date.now()}`,
@@ -91,7 +90,6 @@ app.get('/api/test-register', (req, res) => {
   });
 });
 
-// ✅ Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
     const healthStatus = {
@@ -135,7 +133,7 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// ✅ 404 handler (phải đặt sau tất cả route thật)
+// ✅ 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -143,7 +141,7 @@ app.use('*', (req, res) => {
   });
 });
 
-// ✅ Error handling middleware
+// ✅ Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
@@ -152,7 +150,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ✅ Server start
+// ✅ Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
