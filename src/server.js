@@ -188,15 +188,6 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📍 API Base URL: http://localhost:${PORT}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📋 Available endpoints:`);
-  console.log(`   • POST /api/users/register`);
-  console.log(`   • POST /api/users/login`);
-  console.log(`   • GET  /api/stations`);
-  console.log(`   • POST /api/reservations`);
-  console.log(`   • POST /api/payments/create-session`);
-  console.log(`   • GET  /api/analytics/overview`);
-  console.log(`   • GET  /api/packages`);
 });
 
 export default app;
