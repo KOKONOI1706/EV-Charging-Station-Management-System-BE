@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import stationRoutes from './routes/stations.js';
 import bookingRoutes from './routes/bookings.js';
 import userRoutes from './routes/users.js';
+import chargingSessionRoutes from './routes/chargingSessions.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -45,6 +46,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/stations', stationRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/charging', chargingSessionRoutes);
 
 // Debug endpoint to test database
 app.get('/api/debug', async (req, res) => {
