@@ -11,7 +11,6 @@ import userRoutes from './routes/users.js';
 import kvStoreRoutes from './routes/kvStore.js';
 import userHistoryRouter from './routes/user-history.js'; 
 import personalReportsRouter from './routes/personal-reports.js';
-import chargingSessionsRouter from './routes/charging-sessions.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -52,7 +51,6 @@ app.use('/api/users', userRoutes);
 app.use('/api/kv', kvStoreRoutes);
 app.use('/api/user-history', userHistoryRouter); 
 app.use('/api/personal-reports', personalReportsRouter);
-app.use('/api/charging-sessions', chargingSessionsRouter);
 
 // Debug endpoint to test database
 app.get('/api/debug', async (req, res) => {
