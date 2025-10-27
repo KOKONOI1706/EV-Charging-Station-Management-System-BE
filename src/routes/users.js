@@ -31,13 +31,20 @@ router.get('/', async (req, res) => {
       });
     }
 
+    // Map database role names to frontend role names
+    const roleMapping = {
+      'Driver': 'customer',
+      'Station Manager': 'staff',
+      'Admin': 'admin'
+    };
+    
     // Transform data to match frontend expectations
     const transformedUsers = users.map(user => ({
       id: user.user_id.toString(),
       name: user.name,
       email: user.email,
       phone: user.phone,
-      role: user.roles.name,
+      role: roleMapping[user.roles.name] || 'customer',
       createdAt: user.created_at,
       isActive: user.is_active
     }));
@@ -146,12 +153,19 @@ router.post('/login', async (req, res) => {
       });
     }
     
+    // Map database role names to frontend role names
+    const roleMapping = {
+      'Driver': 'customer',
+      'Station Manager': 'staff',
+      'Admin': 'admin'
+    };
+    
     const userResponse = {
       id: user.user_id.toString(),
       name: user.name,
       email: user.email,
       phone: user.phone,
-      role: user.roles.name,
+      role: roleMapping[user.roles.name] || 'customer',
       createdAt: user.created_at,
       isActive: user.is_active
     };
@@ -290,13 +304,20 @@ router.post('/register', async (req, res) => {
         throw new Error('No user data returned');
       }
       
+      // Map database role names to frontend role names
+      const roleMapping = {
+        'Driver': 'customer',
+        'Station Manager': 'staff',
+        'Admin': 'admin'
+      };
+      
       // Transform response
       const userResponse = {
         id: newUser.user_id.toString(),
         name: newUser.name,
         email: newUser.email,
         phone: newUser.phone,
-        role: newUser.roles.name,
+        role: roleMapping[newUser.roles.name] || 'customer',
         createdAt: newUser.created_at,
         isActive: newUser.is_active
       };
@@ -513,13 +534,20 @@ router.put('/:id', async (req, res) => {
       });
     }
 
+    // Map database role names to frontend role names
+    const roleMapping = {
+      'Driver': 'customer',
+      'Station Manager': 'staff',
+      'Admin': 'admin'
+    };
+    
     // Transform response to match frontend User interface
     const responseUser = {
       id: updatedUser.user_id.toString(),
       name: updatedUser.name,
       email: updatedUser.email,
       phone: updatedUser.phone || '',
-      role: updatedUser.roles.name,
+      role: roleMapping[updatedUser.roles.name] || 'customer',
       memberSince: new Date(updatedUser.created_at).toISOString().split('T')[0],
       totalSessions: 0,
       totalSpent: 0,
