@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch start.js",
-    "start": "node start.js",
-    "build": "echo 'No build step required for Node.js'"
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "build": "echo 'No build step required for Node.js'",
+    "test": "echo 'No tests specified'",
+    "lint": "echo 'No linting configured'",
+    "prod": "NODE_ENV=production node src/server.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
