@@ -9,7 +9,9 @@ import packageRoutes from './routes/packageRoutes.js';
 // Import routes
 import usersRouter from './routes/users.js';
 import stationsRouter from './routes/stations.js';
-import reservationsRouter from './routes/reservations.js';
+import bookingsRouter from './routes/bookings.js';
+import chargingPointsRouter from './routes/chargingPoints.js';
+import chargingSessionsRouter from './routes/chargingSessions.js';
 import paymentsRouter from './routes/payments.js';
 import analyticsRouter from './routes/analytics.js';
 
@@ -51,7 +53,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // ✅ API Routes
 app.use('/api/users', usersRouter);
 app.use('/api/stations', stationsRouter);
-app.use('/api/reservations', reservationsRouter);
+app.use('/api/bookings', bookingsRouter);
+app.use('/api/charging-points', chargingPointsRouter);
+app.use('/api/charging-sessions', chargingSessionsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/packages', packageRoutes);
@@ -65,7 +69,9 @@ app.get('/', (req, res) => {
     endpoints: {
       users: '/api/users',
       stations: '/api/stations',
-      reservations: '/api/reservations',
+      bookings: '/api/bookings',
+      chargingPoints: '/api/charging-points',
+      chargingSessions: '/api/charging-sessions',
       payments: '/api/payments',
       analytics: '/api/analytics',
       packages: '/api/packages'
@@ -193,7 +199,12 @@ app.listen(PORT, () => {
   console.log(`   • POST /api/users/register`);
   console.log(`   • POST /api/users/login`);
   console.log(`   • GET  /api/stations`);
-  console.log(`   • POST /api/reservations`);
+  console.log(`   • POST /api/bookings`);
+  console.log(`   • PUT  /api/bookings/:id/status`);
+  console.log(`   • GET  /api/charging-points`);
+  console.log(`   • PUT  /api/charging-points/:id/status`);
+  console.log(`   • POST /api/charging-sessions`);
+  console.log(`   • PUT  /api/charging-sessions/:id/stop`);
   console.log(`   • POST /api/payments/create-session`);
   console.log(`   • GET  /api/analytics/overview`);
   console.log(`   • GET  /api/packages`);

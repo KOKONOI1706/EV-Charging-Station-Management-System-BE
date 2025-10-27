@@ -44,6 +44,18 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 You can find these values in:
 **Supabase Dashboard → Settings → API**
 
+## Additional Migrations
+
+### Add Foreign Key for charging_points
+If you encounter issues with `charging_points` not having a foreign key relationship with `stations`, follow the instructions in:
+
+📄 **`ADD_FOREIGN_KEY_INSTRUCTIONS.md`**
+
+This adds:
+- Foreign key constraint: `charging_points.station_id` → `stations.station_id`
+- Index for better query performance
+- Cascade delete/update behavior
+
 ## Verifying Setup
 
 After running the scripts, test the connection:
