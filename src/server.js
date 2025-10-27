@@ -11,7 +11,7 @@ import userRoutes from './routes/users.js';
 import kvStoreRoutes from './routes/kvStore.js';
 import userHistoryRouter from './routes/user-history.js'; 
 import personalReportsRouter from './routes/personal-reports.js';
-import chargingSessionRoutes from './routes/chargingSessions.js';
+import chargingSessionRoutes from './routes/chargingSession.js';
 
 
 // Get current directory for ES modules
