@@ -12,6 +12,7 @@ import chargingPointsRouter from './routes/chargingPoints.js';
 import chargingSessionsRouter from './routes/chargingSessions.js';
 import paymentsRouter from './routes/payments.js';
 import analyticsRouter from './routes/analytics.js';
+import packageRoutes from './routes/packageRoutes.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
