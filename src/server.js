@@ -15,6 +15,7 @@ import analyticsRouter from './routes/analytics.js';
 import packageRoutes from './routes/packageRoutes.js';
 import vehiclesRouter from './routes/vehicles.js';
 import staffStatsRouter from './routes/staffStats.js';
+import userStationsRouter from './routes/userStations.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -72,6 +73,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api/packages', packageRoutes);
 app.use('/api/vehicles', vehiclesRouter);
 app.use('/api/staff-stats', staffStatsRouter);
+app.use('/api/user-stations', userStationsRouter);
 
 // ✅ Basic route with API information
 app.get('/', (req, res) => {

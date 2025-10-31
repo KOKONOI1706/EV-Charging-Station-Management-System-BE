@@ -217,11 +217,33 @@ router.post('/', async (req, res) => {
 // GET /api/charging-sessions - Get charging sessions
 router.get('/', async (req, res) => {
   try {
-    const { user_id, status, point_id, limit = 50, offset = 0 } = req.query;
+    const { user_id, status, point_id, stationId, limit = 50, offset = 0, role } = req.query;
 
+    // Optimize: For staff view, we can use lighter query
+    const isStaffView = role === 'staff' && stationId;
+    
     let query = supabase
       .from('charging_sessions')
-      .select(`
+      .select(isStaffView ? `
+        session_id,
+        user_id,
+        point_id,
+        start_time,
+        end_time,
+        energy_consumed_kwh,
+        cost,
+        status,
+        users!inner (
+          user_id,
+          name,
+          email
+        ),
+        charging_points!inner (
+          point_id,
+          name,
+          power_kw
+        )
+      ` : `
         *,
         users (
           user_id,
@@ -268,11 +290,40 @@ router.get('/', async (req, res) => {
       query = query.eq('point_id', point_id);
     }
 
+    // Filter by station - need to get point_ids for this station first
+    if (stationId) {
+      console.time('get-charging-points');
+      const { data: points } = await supabase
+        .from('charging_points')
+        .select('point_id')
+        .eq('station_id', stationId);
+      console.timeEnd('get-charging-points');
+      
+      const pointIds = points?.map(p => p.point_id) || [];
+      console.log(`Station ${stationId} has ${pointIds.length} charging points`);
+      
+      if (pointIds.length > 0) {
+        query = query.in('point_id', pointIds);
+      } else {
+        // No charging points for this station, return empty
+        return res.json({
+          success: true,
+          data: [],
+          total: 0
+        });
+      }
+    }
+
+    console.time('fetch-charging-sessions');
     const { data: sessions, error } = await query;
+    console.timeEnd('fetch-charging-sessions');
 
     if (error) {
+      console.error('Supabase error:', error);
       throw error;
     }
+
+    console.log(`Returned ${sessions?.length || 0} sessions`);
 
     res.json({
       success: true,
