@@ -643,4 +643,81 @@ router.put('/:id/update-meter', async (req, res) => {
   }
 });
 
+// GET /api/charging-sessions/stats/summary - Get session statistics
+router.get('/stats/summary', async (req, res) => {
+  try {
+    const { role, userId, stationId } = req.query;
+
+    let sessionsQuery = supabase
+      .from('charging_sessions')
+      .select('session_id, status, energy_consumed_kwh, cost, start_time, end_time');
+
+    // Filter based on role
+    if (role === 'customer' && userId) {
+      sessionsQuery = sessionsQuery.eq('user_id', userId);
+    } else if (role === 'staff' && stationId) {
+      // Get charging points for this station
+      const { data: points } = await supabase
+        .from('charging_points')
+        .select('point_id')
+        .eq('station_id', stationId);
+      
+      const pointIds = points?.map(p => p.point_id) || [];
+      if (pointIds.length > 0) {
+        sessionsQuery = sessionsQuery.in('point_id', pointIds);
+      }
+    }
+    // For admin role, no filter - get all sessions
+
+    const { data: sessions, error } = await sessionsQuery;
+
+    if (error) throw error;
+
+    // Calculate statistics
+    const totalSessions = sessions?.length || 0;
+    const activeSessions = sessions?.filter(s => s.status === 'Active').length || 0;
+    const completedSessions = sessions?.filter(s => s.status === 'Completed').length || 0;
+    
+    const totalEnergyConsumed = sessions?.reduce((sum, s) => 
+      sum + (parseFloat(s.energy_consumed_kwh) || 0), 0) || 0;
+    
+    const totalRevenue = sessions?.reduce((sum, s) => 
+      sum + (parseFloat(s.cost) || 0), 0) || 0;
+
+    // Calculate average session duration (in hours)
+    const completedWithDuration = sessions?.filter(s => 
+      s.status === 'Completed' && s.start_time && s.end_time
+    ) || [];
+    
+    let averageSessionDuration = 0;
+    if (completedWithDuration.length > 0) {
+      const totalDuration = completedWithDuration.reduce((sum, s) => {
+        const start = new Date(s.start_time).getTime();
+        const end = new Date(s.end_time).getTime();
+        return sum + (end - start) / (1000 * 60 * 60); // hours
+      }, 0);
+      averageSessionDuration = totalDuration / completedWithDuration.length;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        totalSessions,
+        activeSessions,
+        completedSessions,
+        totalEnergyConsumed: Math.round(totalEnergyConsumed * 100) / 100,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        averageSessionDuration: Math.round(averageSessionDuration * 100) / 100
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching session stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch session statistics',
+      message: error.message
+    });
+  }
+});
+
 export default router;
