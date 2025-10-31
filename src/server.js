@@ -5,10 +5,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 // Import routes
-import stationRoutes from './routes/stations.js';
-import bookingRoutes from './routes/bookings.js';
-import userRoutes from './routes/users.js';
-import chargingSessionRoutes from './routes/chargingSessions.js';
+import usersRouter from './routes/users.js';
+import stationsRouter from './routes/stations.js';
+import bookingsRouter from './routes/bookings.js';
+import chargingPointsRouter from './routes/chargingPoints.js';
+import chargingSessionsRouter from './routes/chargingSessions.js';
+import paymentsRouter from './routes/payments.js';
+import analyticsRouter from './routes/analytics.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -55,52 +58,32 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
-app.use('/api/stations', stationRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/charging', chargingSessionRoutes);
+// ✅ API Routes
+app.use('/api/users', usersRouter);
+app.use('/api/stations', stationsRouter);
+app.use('/api/bookings', bookingsRouter);
+app.use('/api/charging-points', chargingPointsRouter);
+app.use('/api/charging-sessions', chargingSessionsRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/packages', packageRoutes);
 
-// Debug endpoint to test database
-app.get('/api/debug', async (req, res) => {
-  try {
-    const { supabaseAdmin } = await import('./config/supabase.js');
-    
-    // Test basic query
-    const { data: roles, error } = await supabaseAdmin
-      .from('roles')
-      .select('*');
-    
-    res.json({
-      success: true,
-      roles: roles,
-      error: error
-    });
-  } catch (err) {
-    res.json({
-      success: false,
-      error: err.message
-    });
-  }
-});
-
-// Test registration endpoint
-app.get('/api/test-register', (req, res) => {
-  const mockUser = {
-    id: `user_${Date.now()}`,
-    name: "Test User",
-    email: "test@example.com",
-    role: "customer",
-    createdAt: new Date().toISOString()
-  };
-  
+// ✅ Basic route with API information
+app.get('/', (req, res) => {
   res.json({
-    success: true,
-    data: {
-      user: mockUser,
-      token: `demo_token_${mockUser.id}`
-    },
-    message: 'Test registration successful'
+    message: 'EV Charging Station API Server',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      users: '/api/users',
+      stations: '/api/stations',
+      bookings: '/api/bookings',
+      chargingPoints: '/api/charging-points',
+      chargingSessions: '/api/charging-sessions',
+      payments: '/api/payments',
+      analytics: '/api/analytics',
+      packages: '/api/packages'
+    }
   });
 });
 
@@ -172,6 +155,19 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`📋 Available endpoints:`);
+  console.log(`   • POST /api/users/register`);
+  console.log(`   • POST /api/users/login`);
+  console.log(`   • GET  /api/stations`);
+  console.log(`   • POST /api/bookings`);
+  console.log(`   • PUT  /api/bookings/:id/status`);
+  console.log(`   • GET  /api/charging-points`);
+  console.log(`   • PUT  /api/charging-points/:id/status`);
+  console.log(`   • POST /api/charging-sessions`);
+  console.log(`   • PUT  /api/charging-sessions/:id/stop`);
+  console.log(`   • POST /api/payments/create-session`);
+  console.log(`   • GET  /api/analytics/overview`);
+  console.log(`   • GET  /api/packages`);
 });
 
 export default app;
