@@ -1,125 +1,54 @@
 import express from 'express';
-import { StationModel } from '../models/Station.js';
-import { supabase, supabaseAdmin } from '../config/supabase.js';
+import supabase from '../supabase/client.js';
 
 const router = express.Router();
 
-// GET /api/stations - Get all stations
+// GET /api/stations - Get all stations with optional location filtering
 router.get('/', async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
     
-    let query = supabaseAdmin
+    // Base query for all stations
+    let query = supabase
       .from('stations')
-      .select(`
-        station_id,
-        name,
-        address,
-        latitude,
-        longitude,
-        total_points,
-        status,
-        created_at,
-        charging_points!inner(
-          point_id,
-          name,
-          status,
-          power_kw,
-          price_rate,
-          connector_types(
-            code,
-            name,
-            max_power_kw
-          )
-        )
-      `)
-      .eq('status', 'Available');
+      .select('*')
+      .order('name');
 
-    // If coordinates provided, use the nearby stations function
-    if (lat && lng) {
-      const radiusKm = radius ? parseFloat(radius) : 10;
-      const { data: nearbyStations, error } = await supabaseAdmin
-        .rpc('find_nearby_stations', {
-          lat: parseFloat(lat),
-          lng: parseFloat(lng),
-          radius_km: radiusKm
-        });
-
-      if (error) {
-        console.error('Error finding nearby stations:', error);
-        // Fallback to regular query
-        const { data: stations, error: fallbackError } = await query;
-        if (fallbackError) throw fallbackError;
-        
-        return res.json({
-          success: true,
-          data: stations || [],
-          total: stations?.length || 0
-        });
-      }
-
-      // Get detailed info for nearby stations
-      const stationIds = nearbyStations.map(s => s.station_id);
-      if (stationIds.length > 0) {
-        const { data: detailedStations, error: detailError } = await supabaseAdmin
-          .from('stations')
-          .select(`
-            station_id,
-            name,
-            address,
-            latitude,
-            longitude,
-            total_points,
-            status,
-            created_at,
-            charging_points(
-              point_id,
-              name,
-              status,
-              power_kw,
-              price_rate,
-              connector_types(
-                code,
-                name,
-                max_power_kw
-              )
-            )
-          `)
-          .in('station_id', stationIds)
-          .eq('status', 'Available');
-
-        if (detailError) throw detailError;
-
-        // Merge distance info
-        const enrichedStations = detailedStations?.map(station => {
-          const nearbyInfo = nearbyStations.find(ns => ns.station_id === station.station_id);
-          return {
-            ...station,
-            distance_km: nearbyInfo?.distance_km || null,
-            available_points: nearbyInfo?.available_points || 0
-          };
-        }) || [];
-
-        return res.json({
-          success: true,
-          data: enrichedStations,
-          total: enrichedStations.length
-        });
-      }
-    }
-
-    // Regular query for all stations
     const { data: stations, error } = await query;
 
     if (error) {
       throw error;
     }
 
-    // Calculate available points for each station
-    const enrichedStations = stations?.map(station => ({
-      ...station,
-      available_points: station.charging_points?.filter(cp => cp.status === 'Available').length || 0
-    })) || [];
+    // Calculate distances and filter if location provided
+    let enrichedStations = stations || [];
+    
+    if (lat && lng && stations) {
+      const userLat = parseFloat(lat);
+      const userLng = parseFloat(lng);
+      const maxRadius = radius ? parseFloat(radius) : 50; // Default 50 km radius
+
+      enrichedStations = stations.map(station => {
+        const distance = calculateDistance(
+          userLat, 
+          userLng, 
+          station.lat || station.latitude, 
+          station.lng || station.longitude
+        );
+        return {
+          ...station,
+          distance_km: parseFloat(distance.toFixed(2))
+        };
+      });
+
+      // Filter by radius
+      enrichedStations = enrichedStations.filter(
+        station => station.distance_km <= maxRadius
+      );
+
+      // Sort by distance
+      enrichedStations.sort((a, b) => a.distance_km - b.distance_km);
+    }
 
     res.json({
       success: true,
@@ -139,15 +68,24 @@ router.get('/', async (req, res) => {
 // GET /api/stations/:id - Get station by ID
 router.get('/:id', async (req, res) => {
   try {
-    const station = await StationModel.getById(req.params.id);
+    const { id } = req.params;
     
-    if (!station) {
-      return res.status(404).json({
-        success: false,
-        error: 'Station not found'
-      });
+    const { data: station, error } = await supabase
+      .from('stations')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'Station not found'
+        });
+      }
+      throw error;
     }
-    
+
     res.json({
       success: true,
       data: station
@@ -171,7 +109,15 @@ router.post('/', async (req, res) => {
       updated_at: new Date().toISOString()
     };
     
-    const newStation = await StationModel.create(stationData);
+    const { data: newStation, error } = await supabase
+      .from('stations')
+      .insert([stationData])
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
     
     res.status(201).json({
       success: true,
@@ -187,5 +133,237 @@ router.post('/', async (req, res) => {
     });
   }
 });
+
+// POST /api/stations/search - Search stations with filters
+router.post('/search', async (req, res) => {
+  try {
+    const { 
+      query, 
+      filters = {},
+      location = null 
+    } = req.body;
+
+    let supabaseQuery = supabase.from('stations').select('*');
+
+    // Text search
+    if (query) {
+      supabaseQuery = supabaseQuery.or(
+        `name.ilike.%${query}%,address.ilike.%${query}%,city.ilike.%${query}%`
+      );
+    }
+
+    // Availability filter
+    if (filters.availability) {
+      supabaseQuery = supabaseQuery.gt('available_spots', 0);
+    }
+
+    // Power filter
+    if (filters.minPower) {
+      supabaseQuery = supabaseQuery.gte('power_kw', filters.minPower);
+    }
+
+    // Connector type filter
+    if (filters.connector) {
+      supabaseQuery = supabaseQuery.ilike('connector', `%${filters.connector}%`);
+    }
+
+    // Status filter
+    if (filters.status) {
+      supabaseQuery = supabaseQuery.eq('status', filters.status);
+    }
+
+    const { data: stations, error } = await supabaseQuery.order('name');
+
+    if (error) {
+      throw error;
+    }
+
+    // Calculate distances if location provided
+    let stationsWithDistance = stations || [];
+    if (location && location.lat && location.lng) {
+      stationsWithDistance = stations.map(station => {
+        const distance = calculateDistance(
+          location.lat, 
+          location.lng, 
+          station.lat || station.latitude, 
+          station.lng || station.longitude
+        );
+        return {
+          ...station,
+          distance_km: parseFloat(distance.toFixed(2))
+        };
+      });
+
+      // Apply distance filter if specified
+      if (filters.maxDistance) {
+        stationsWithDistance = stationsWithDistance.filter(
+          station => station.distance_km <= filters.maxDistance
+        );
+      }
+
+      // Sort by distance
+      stationsWithDistance.sort((a, b) => a.distance_km - b.distance_km);
+    }
+
+    res.json({
+      success: true,
+      data: stationsWithDistance,
+      total: stationsWithDistance.length,
+      query,
+      filters,
+      location
+    });
+  } catch (error) {
+    console.error('Error searching stations:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to search stations',
+      message: error.message
+    });
+  }
+});
+
+// PUT /api/stations/:id - Update station (admin only)
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = {
+      ...req.body,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: updatedStation, error } = await supabase
+      .from('stations')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'Station not found'
+        });
+      }
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      data: updatedStation,
+      message: 'Station updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating station:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update station',
+      message: error.message
+    });
+  }
+});
+
+// PUT /api/stations/:id/availability - Update station availability
+router.put('/:id/availability', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { change } = req.body; // +1 or -1
+
+    // Get current station data
+    const { data: station, error: fetchError } = await supabase
+      .from('stations')
+      .select('available_spots, total_spots')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: 'Station not found'
+        });
+      }
+      throw fetchError;
+    }
+
+    const newAvailableSpots = Math.max(0, Math.min(
+      station.total_spots, 
+      station.available_spots + change
+    ));
+
+    const { data: updatedStation, error: updateError } = await supabase
+      .from('stations')
+      .update({ 
+        available_spots: newAvailableSpots,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    res.json({
+      success: true,
+      data: updatedStation,
+      message: 'Station availability updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating station availability:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update station availability',
+      message: error.message
+    });
+  }
+});
+
+// DELETE /api/stations/:id - Delete station (admin only)
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from('stations')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      message: 'Station deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting station:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete station',
+      message: error.message
+    });
+  }
+});
+
+// Helper function to calculate distance between two points (in kilometers)
+function calculateDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = deg2rad(lat2 - lat1);
+  const dLng = deg2rad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI / 180);
+}
 
 export default router;
