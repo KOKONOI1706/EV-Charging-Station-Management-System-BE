@@ -7,7 +7,13 @@ const router = express.Router();
 // ============ MoMo Payment Routes ============
 
 // POST /api/payments/momo/create - Create MoMo payment session
-router.post('/momo/create', paymentController.createPaymentSession);
+router.post('/momo/create', (req, res, next) => {
+  console.log('🎯 Received MoMo payment request:', {
+    session_id: req.body.session_id,
+    amount: req.body.amount
+  });
+  next();
+}, paymentController.createPaymentSession);
 
 // POST /api/payments/momo/ipn - MoMo IPN callback (webhook)
 router.post('/momo/ipn', paymentController.handleMoMoIPN);

@@ -9,7 +9,7 @@ const MOMO_CONFIG = {
   accessKey: process.env.MOMO_ACCESS_KEY || "F8BBA842ECF85",
   secretKey: process.env.MOMO_SECRET_KEY || "K951B6PE1waDMi640xX08PD3vg6EkVlz",
   endpoint: process.env.MOMO_ENDPOINT || "https://test-payment.momo.vn",
-  redirectUrl: process.env.MOMO_REDIRECT_URL || "http://localhost:3001/payment/callback",
+  redirectUrl: process.env.MOMO_REDIRECT_URL || "http://localhost:3000/payment/callback",
   ipnUrl: process.env.MOMO_IPN_URL || "http://localhost:5000/api/payments/momo/ipn",
   requestType: "captureWallet"
 };
@@ -145,6 +145,7 @@ export const createPaymentSession = async (req, res) => {
     }
 
     // Get charging session details
+    console.log('🔍 Looking for session:', session_id);
     const { data: session, error: sessionError } = await supabase
       .from('charging_sessions')
       .select(`
@@ -154,7 +155,7 @@ export const createPaymentSession = async (req, res) => {
           name,
           power_kw,
           stations (
-            station_id,
+            id,
             name,
             address
           )
@@ -168,10 +169,17 @@ export const createPaymentSession = async (req, res) => {
       .eq('session_id', session_id)
       .single();
 
+    console.log('📊 Session query result:', {
+      found: !!session,
+      error: sessionError?.message,
+      sessionData: session ? { id: session.session_id, status: session.status } : null
+    });
+
     if (sessionError || !session) {
       return res.status(404).json({
         success: false,
-        error: 'Charging session not found'
+        error: 'Charging session not found',
+        details: sessionError?.message
       });
     }
 
@@ -180,14 +188,17 @@ export const createPaymentSession = async (req, res) => {
       .from('payments')
       .select('*')
       .eq('session_id', session_id)
-      .eq('status', 'pending')
-      .single();
+      .eq('status', 'Pending')
+      .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no record
 
     if (existingPayment) {
+      console.log('⚠️ Payment already exists:', existingPayment.payment_id);
       return res.status(409).json({
         success: false,
         error: 'Payment already exists for this session',
-        payment_id: existingPayment.payment_id
+        payment_id: existingPayment.payment_id,
+        order_id: existingPayment.order_id,
+        payment_url: existingPayment.payment_url
       });
     }
 
@@ -210,16 +221,27 @@ export const createPaymentSession = async (req, res) => {
 
     // Create payment record in database
     const paymentData = {
+      user_id: session.user_id,
       session_id: session_id,
       amount: amountInVND,
       currency: currency,
       payment_method: 'momo',
-      status: 'pending',
+      status: 'Pending', // Match database enum: Pending, Completed, Failed
       order_id: orderId,
       momo_request_id: momoPayment.requestId,
       payment_url: momoPayment.payUrl,
-      date: new Date().toISOString()
+      qr_code_url: momoPayment.qrCodeUrl,
+      momo_response: momoPayment,
+      date: new Date().toISOString(),
+      created_at: new Date().toISOString()
     };
+
+    console.log('💾 Inserting payment record:', {
+      user_id: paymentData.user_id,
+      session_id: paymentData.session_id,
+      amount: paymentData.amount,
+      order_id: paymentData.order_id
+    });
 
     const { data: payment, error: paymentError } = await supabase
       .from('payments')
@@ -228,8 +250,11 @@ export const createPaymentSession = async (req, res) => {
       .single();
 
     if (paymentError) {
+      console.error('❌ Payment insert error:', paymentError);
       throw paymentError;
     }
+
+    console.log('✅ Payment record created:', payment.payment_id);
 
     res.json({
       success: true,
@@ -391,12 +416,45 @@ export const handleMoMoIPN = async (req, res) => {
 export const checkPaymentStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
+    
+    console.log('🔍 Checking payment status for orderId:', orderId);
 
-    const { data: payment, error } = await supabase
+    // First, get the payment without joins to ensure we find it
+    const { data: payments, error } = await supabase
       .from('payments')
-      .select(`
-        *,
-        charging_sessions (
+      .select('*')
+      .eq('order_id', orderId);
+
+    console.log('📊 Payment query result:', {
+      found: payments?.length > 0,
+      count: payments?.length,
+      error: error?.message
+    });
+
+    if (error || !payments || payments.length === 0) {
+      console.log('❌ Payment not found:', { orderId, error: error?.message });
+      return res.status(404).json({
+        success: false,
+        error: 'Payment not found',
+        orderId: orderId
+      });
+    }
+
+    const payment = payments[0];
+    
+    console.log('✅ Payment found:', {
+      payment_id: payment.payment_id,
+      status: payment.status,
+      amount: payment.amount,
+      session_id: payment.session_id
+    });
+
+    // Now get session details if session_id exists
+    let sessionDetails = null;
+    if (payment.session_id) {
+      const { data: session } = await supabase
+        .from('charging_sessions')
+        .select(`
           session_id,
           user_id,
           point_id,
@@ -408,21 +466,22 @@ export const checkPaymentStatus = async (req, res) => {
               address
             )
           )
-        )
-      `)
-      .eq('order_id', orderId)
-      .single();
-
-    if (error) {
-      return res.status(404).json({
-        success: false,
-        error: 'Payment not found'
-      });
+        `)
+        .eq('session_id', payment.session_id)
+        .maybeSingle();
+      
+      sessionDetails = session;
     }
+
+    // Combine payment and session data
+    const responseData = {
+      ...payment,
+      charging_sessions: sessionDetails
+    };
 
     res.json({
       success: true,
-      data: payment
+      data: responseData
     });
 
   } catch (error) {

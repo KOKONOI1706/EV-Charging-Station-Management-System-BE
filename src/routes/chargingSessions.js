@@ -22,6 +22,15 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Validate meter_start value - must be reasonable (0 to 10,000 kWh)
+    const parsedMeterStart = parseFloat(meter_start);
+    if (isNaN(parsedMeterStart) || parsedMeterStart < 0 || parsedMeterStart > 10000) {
+      return res.status(400).json({
+        success: false,
+        error: 'meter_start must be a number between 0 and 10,000 kWh'
+      });
+    }
+
     // Check if charging point exists and is available for charging
     const { data: chargingPoint, error: pointError } = await supabase
       .from('charging_points')
@@ -137,7 +146,7 @@ router.post('/', async (req, res) => {
       point_id,
       booking_id: booking_id || null,
       start_time: new Date().toISOString(),
-      meter_start: parseFloat(meter_start),
+      meter_start: parsedMeterStart, // Use validated value
       status: 'Active',
       created_at: new Date().toISOString()
     };
