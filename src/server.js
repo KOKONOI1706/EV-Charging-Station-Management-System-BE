@@ -155,20 +155,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📋 Available endpoints:`);
-  console.log(`   • POST /api/users/register`);
-  console.log(`   • POST /api/users/login`);
-  console.log(`   • GET  /api/stations`);
-  console.log(`   • POST /api/bookings`);
-  console.log(`   • PUT  /api/bookings/:id/status`);
-  console.log(`   • GET  /api/charging-points`);
-  console.log(`   • PUT  /api/charging-points/:id/status`);
-  console.log(`   • POST /api/charging-sessions`);
-  console.log(`   • PUT  /api/charging-sessions/:id/stop`);
-  console.log(`   • POST /api/payments/create-session`);
-  console.log(`   • GET  /api/analytics/overview`);
-  console.log(`   • GET  /api/packages`);
 });
 
 export default app;
