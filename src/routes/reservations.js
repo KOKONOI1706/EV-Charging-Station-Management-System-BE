@@ -9,6 +9,7 @@ router.post('/', async (req, res) => {
     const {
       user_id,
       station_id,
+      charging_point_id,
       start_time,
       end_time,
       total_cost,
@@ -22,6 +23,36 @@ router.post('/', async (req, res) => {
         success: false,
         error: 'Missing required fields: user_id, station_id, start_time, end_time'
       });
+    }
+
+    // Check if specific charging point is requested and available
+    if (charging_point_id) {
+      const { data: chargingPoint, error: pointError } = await supabase
+        .from('charging_points')
+        .select('status, station_id')
+        .eq('point_id', charging_point_id)
+        .single();
+
+      if (pointError) {
+        return res.status(404).json({
+          success: false,
+          error: 'Charging point not found'
+        });
+      }
+
+      if (chargingPoint.station_id !== station_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'Charging point does not belong to this station'
+        });
+      }
+
+      if (chargingPoint.status !== 'Available') {
+        return res.status(400).json({
+          success: false,
+          error: `Charging point is not available. Current status: ${chargingPoint.status}`
+        });
+      }
     }
 
     // Check if station exists and has availability
@@ -73,6 +104,7 @@ router.post('/', async (req, res) => {
     const reservationData = {
       user_id,
       station_id,
+      charging_point_id: charging_point_id || null,
       start_time,
       end_time,
       total_cost: parseFloat(total_cost) || 0,
@@ -101,6 +133,25 @@ router.post('/', async (req, res) => {
 
     if (createError) {
       throw createError;
+    }
+
+    // Update charging point status to Reserved if specific point was selected
+    if (charging_point_id) {
+      const { error: updatePointError } = await supabase
+        .from('charging_points')
+        .update({
+          status: 'Reserved',
+          updated_at: new Date().toISOString(),
+          last_seen_at: new Date().toISOString()
+        })
+        .eq('point_id', charging_point_id);
+
+      if (updatePointError) {
+        console.error('Failed to update charging point status:', updatePointError);
+        // Don't fail the reservation, just log the error
+      } else {
+        console.log(`✅ Charging point ${charging_point_id} status updated to Reserved`);
+      }
     }
 
     res.status(201).json({
@@ -233,6 +284,20 @@ router.put('/:id/status', async (req, res) => {
       });
     }
 
+    // Get current reservation to check charging_point_id
+    const { data: currentReservation, error: fetchError } = await supabase
+      .from('reservations')
+      .select('charging_point_id, status')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      return res.status(404).json({
+        success: false,
+        error: 'Reservation not found'
+      });
+    }
+
     const updateData = {
       status,
       updated_at: new Date().toISOString()
@@ -271,6 +336,34 @@ router.put('/:id/status', async (req, res) => {
       throw error;
     }
 
+    // Update charging point status based on reservation status
+    if (currentReservation.charging_point_id) {
+      let newPointStatus = null;
+
+      if (status === 'completed' || status === 'cancelled') {
+        newPointStatus = 'Available';
+      } else if (status === 'active') {
+        newPointStatus = 'In Use';
+      }
+
+      if (newPointStatus) {
+        const { error: updatePointError } = await supabase
+          .from('charging_points')
+          .update({
+            status: newPointStatus,
+            updated_at: new Date().toISOString(),
+            last_seen_at: new Date().toISOString()
+          })
+          .eq('point_id', currentReservation.charging_point_id);
+
+        if (updatePointError) {
+          console.error('Failed to update charging point status:', updatePointError);
+        } else {
+          console.log(`✅ Charging point ${currentReservation.charging_point_id} status updated to ${newPointStatus}`);
+        }
+      }
+    }
+
     res.json({
       success: true,
       data: reservation,
@@ -294,7 +387,7 @@ router.delete('/:id', async (req, res) => {
     // Check if reservation exists and can be cancelled
     const { data: reservation, error: fetchError } = await supabase
       .from('reservations')
-      .select('status, start_time')
+      .select('status, start_time, charging_point_id')
       .eq('id', id)
       .single();
 
@@ -329,6 +422,24 @@ router.delete('/:id', async (req, res) => {
 
     if (updateError) {
       throw updateError;
+    }
+
+    // Release charging point if it was reserved
+    if (reservation.charging_point_id) {
+      const { error: releaseError } = await supabase
+        .from('charging_points')
+        .update({
+          status: 'Available',
+          updated_at: new Date().toISOString(),
+          last_seen_at: new Date().toISOString()
+        })
+        .eq('point_id', reservation.charging_point_id);
+
+      if (releaseError) {
+        console.error('Failed to release charging point:', releaseError);
+      } else {
+        console.log(`✅ Charging point ${reservation.charging_point_id} released and set to Available`);
+      }
     }
 
     res.json({

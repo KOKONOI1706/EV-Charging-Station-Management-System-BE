@@ -1,7 +1,30 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import paymentController from '../controllers/paymentController.js';
 
 const router = express.Router();
+
+// ============ MoMo Payment Routes ============
+
+// POST /api/payments/momo/create - Create MoMo payment session
+router.post('/momo/create', (req, res, next) => {
+  console.log('🎯 Received MoMo payment request:', {
+    session_id: req.body.session_id,
+    amount: req.body.amount
+  });
+  next();
+}, paymentController.createPaymentSession);
+
+// POST /api/payments/momo/ipn - MoMo IPN callback (webhook)
+router.post('/momo/ipn', paymentController.handleMoMoIPN);
+
+// GET /api/payments/momo/status/:orderId - Check MoMo payment status
+router.get('/momo/status/:orderId', paymentController.checkPaymentStatus);
+
+// GET /api/payments/user/:userId - Get user's payment history
+router.get('/user/:userId', paymentController.getUserPayments);
+
+// ============ Legacy Payment Routes (Keep for backward compatibility) ============
 
 // POST /api/payments/create-session - Create payment session
 router.post('/create-session', async (req, res) => {
