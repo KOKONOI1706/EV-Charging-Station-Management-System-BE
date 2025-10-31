@@ -13,6 +13,7 @@ import chargingSessionsRouter from './routes/chargingSessions.js';
 import paymentsRouter from './routes/payments.js';
 import analyticsRouter from './routes/analytics.js';
 import packageRoutes from './routes/packageRoutes.js';
+import vehiclesRouter from './routes/vehicles.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -68,6 +69,7 @@ app.use('/api/charging-sessions', chargingSessionsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/packages', packageRoutes);
+app.use('/api/vehicles', vehiclesRouter);
 
 // ✅ Basic route with API information
 app.get('/', (req, res) => {
@@ -83,7 +85,8 @@ app.get('/', (req, res) => {
       chargingSessions: '/api/charging-sessions',
       payments: '/api/payments',
       analytics: '/api/analytics',
-      packages: '/api/packages'
+      packages: '/api/packages',
+      vehicles: '/api/vehicles'
     }
   });
 });
