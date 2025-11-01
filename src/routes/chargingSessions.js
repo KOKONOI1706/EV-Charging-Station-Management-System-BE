@@ -217,10 +217,13 @@ router.post('/', async (req, res) => {
 // GET /api/charging-sessions - Get charging sessions
 router.get('/', async (req, res) => {
   try {
-    const { user_id, status, point_id, stationId, limit = 50, offset = 0, role } = req.query;
+    const { user_id, status, point_id, stationId, limit, offset = 0, role } = req.query;
 
     // Optimize: For staff view, we can use lighter query
     const isStaffView = role === 'staff' && stationId;
+    
+    // For staff, get ALL sessions (no limit), for others use limit or default to 50
+    const effectiveLimit = isStaffView ? 10000 : (limit ? parseInt(limit) : 50);
     
     let query = supabase
       .from('charging_sessions')
@@ -276,7 +279,7 @@ router.get('/', async (req, res) => {
         )
       `)
       .order('start_time', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .range(offset, offset + effectiveLimit - 1);
 
     if (user_id) {
       query = query.eq('user_id', user_id);
