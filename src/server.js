@@ -5,14 +5,17 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 // Import routes
-import stationRoutes from './routes/stations.js';
-import bookingRoutes from './routes/bookings.js';
-import userRoutes from './routes/users.js';
-import kvStoreRoutes from './routes/kvStore.js';
-import userHistoryRouter from './routes/user-history.js'; 
-import personalReportsRouter from './routes/personal-reports.js';
-import chargingSessionRoutes from './routes/chargingSession.js';
-
+import usersRouter from './routes/users.js';
+import stationsRouter from './routes/stations.js';
+import bookingsRouter from './routes/bookings.js';
+import chargingPointsRouter from './routes/chargingPoints.js';
+import chargingSessionsRouter from './routes/chargingSessions.js';
+import paymentsRouter from './routes/payments.js';
+import analyticsRouter from './routes/analytics.js';
+import packageRoutes from './routes/packageRoutes.js';
+import vehiclesRouter from './routes/vehicles.js';
+import staffStatsRouter from './routes/staffStats.js';
+import userStationsRouter from './routes/userStations.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -59,55 +62,36 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
-app.use('/api/stations', stationRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/kv', kvStoreRoutes);
-app.use('/api/user-history', userHistoryRouter); 
-app.use('/api/personal-reports', personalReportsRouter);
-app.use('/api/charging', chargingSessionRoutes);
+// ✅ API Routes
+app.use('/api/users', usersRouter);
+app.use('/api/stations', stationsRouter);
+app.use('/api/bookings', bookingsRouter);
+app.use('/api/charging-points', chargingPointsRouter);
+app.use('/api/charging-sessions', chargingSessionsRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/packages', packageRoutes);
+app.use('/api/vehicles', vehiclesRouter);
+app.use('/api/staff-stats', staffStatsRouter);
+app.use('/api/user-stations', userStationsRouter);
 
-// Debug endpoint to test database
-app.get('/api/debug', async (req, res) => {
-  try {
-    const { supabaseAdmin } = await import('./config/supabase.js');
-    
-    // Test basic query
-    const { data: roles, error } = await supabaseAdmin
-      .from('roles')
-      .select('*');
-    
-    res.json({
-      success: true,
-      roles: roles,
-      error: error
-    });
-  } catch (err) {
-    res.json({
-      success: false,
-      error: err.message
-    });
-  }
-});
-
-// Test registration endpoint
-app.get('/api/test-register', (req, res) => {
-  const mockUser = {
-    id: `user_${Date.now()}`,
-    name: "Test User",
-    email: "test@example.com",
-    role: "customer",
-    createdAt: new Date().toISOString()
-  };
-  
+// ✅ Basic route with API information
+app.get('/', (req, res) => {
   res.json({
-    success: true,
-    data: {
-      user: mockUser,
-      token: `demo_token_${mockUser.id}`
-    },
-    message: 'Test registration successful'
+    message: 'EV Charging Station API Server',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      users: '/api/users',
+      stations: '/api/stations',
+      bookings: '/api/bookings',
+      chargingPoints: '/api/charging-points',
+      chargingSessions: '/api/charging-sessions',
+      payments: '/api/payments',
+      analytics: '/api/analytics',
+      packages: '/api/packages',
+      vehicles: '/api/vehicles'
+    }
   });
 });
 
@@ -178,7 +162,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
 });
 
 export default app;
