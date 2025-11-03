@@ -9,7 +9,7 @@ import usersRouter from './routes/users.js';
 import stationsRouter from './routes/stations.js';
 import bookingsRouter from './routes/bookings.js';
 import chargingPointsRouter from './routes/chargingPoints.js';
-import chargingSessionsRouter from './routes/chargingSessions.js';
+import chargingSessionsRouter from './routes/chargingSession.js';
 import paymentsRouter from './routes/payments.js';
 import analyticsRouter from './routes/analytics.js';
 import packageRoutes from './routes/packageRoutes.js';
