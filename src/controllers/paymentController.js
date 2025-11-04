@@ -574,6 +574,37 @@ export const manualCompletePayment = async (req, res) => {
     // Check if already completed
     if (payment.status === 'Completed') {
       console.log('ℹ️ Payment already completed');
+      
+      // Even if payment is completed, ensure session is also marked as completed
+      if (payment.session_id) {
+        const { data: sessionCheck } = await supabase
+          .from('charging_sessions')
+          .select('status')
+          .eq('session_id', payment.session_id)
+          .single();
+        
+        // Update session if it's still Active
+        if (sessionCheck && sessionCheck.status === 'Active') {
+          const { data: fixed, error: fixError } = await supabase
+            .from('charging_sessions')
+            .update({
+              status: 'Completed'
+            })
+            .eq('session_id', payment.session_id)
+            .select()
+            .single();
+          
+          if (fixError) {
+            console.error('❌ Failed to fix session status:', fixError);
+          } else {
+            console.log('✅ Session status fixed to Completed:', payment.session_id);
+            console.log('Fixed session:', fixed);
+          }
+        } else {
+          console.log('ℹ️ Session already completed or not found:', sessionCheck?.status);
+        }
+      }
+      
       return res.json({
         success: true,
         message: 'Payment already completed',
@@ -599,14 +630,25 @@ export const manualCompletePayment = async (req, res) => {
 
     console.log('✅ Payment manually completed:', payment.payment_id);
 
-    // Update charging session payment status
+    // Update charging session status (payment_status column doesn't exist in DB)
     if (payment.session_id) {
-      await supabase
+      const { data: updatedSession, error: sessionError } = await supabase
         .from('charging_sessions')
         .update({
-          payment_status: 'paid'
+          status: 'Completed'
         })
-        .eq('session_id', payment.session_id);
+        .eq('session_id', payment.session_id)
+        .select()
+        .single();
+      
+      if (sessionError) {
+        console.error('❌ Failed to update session status:', sessionError);
+        console.error('Session ID:', payment.session_id);
+        // Don't throw - payment is already completed, just log the error
+      } else {
+        console.log('✅ Charging session marked as Completed:', payment.session_id);
+        console.log('Updated session:', updatedSession);
+      }
     }
 
     res.json({
