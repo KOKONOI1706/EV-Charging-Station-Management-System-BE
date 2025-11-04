@@ -184,22 +184,60 @@ export const createPaymentSession = async (req, res) => {
     }
 
     // Check if payment already exists
-    const { data: existingPayment } = await supabase
+    const { data: existingPayments } = await supabase
       .from('payments')
       .select('*')
       .eq('session_id', session_id)
-      .eq('status', 'Pending')
-      .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no record
+      .in('status', ['Pending', 'Completed']);
 
-    if (existingPayment) {
-      console.log('⚠️ Payment already exists:', existingPayment.payment_id);
+    // If there's a completed payment, don't allow creating another one
+    const completedPayment = existingPayments?.find(p => p.status === 'Completed');
+    if (completedPayment) {
+      console.log('❌ Payment already completed:', completedPayment.payment_id);
       return res.status(409).json({
         success: false,
-        error: 'Payment already exists for this session',
-        payment_id: existingPayment.payment_id,
-        order_id: existingPayment.order_id,
-        payment_url: existingPayment.payment_url
+        error: 'Payment already completed for this session',
+        payment_id: completedPayment.payment_id,
+        status: 'Completed'
       });
+    }
+
+    // If there's a pending payment, check if it's still valid (created within last 15 minutes)
+    const pendingPayment = existingPayments?.find(p => p.status === 'Pending');
+    if (pendingPayment) {
+      const createdAt = new Date(pendingPayment.created_at);
+      const now = new Date();
+      const minutesElapsed = (now - createdAt) / (1000 * 60);
+      
+      // If payment is still valid (< 15 minutes old), return existing payment URL
+      if (minutesElapsed < 15 && pendingPayment.payment_url) {
+        console.log('✅ Returning existing payment URL (still valid):', pendingPayment.payment_id);
+        return res.json({
+          success: true,
+          data: {
+            payment_id: pendingPayment.payment_id,
+            order_id: pendingPayment.order_id,
+            amount: pendingPayment.amount,
+            currency: pendingPayment.currency,
+            payment_url: pendingPayment.payment_url,
+            qrCodeUrl: pendingPayment.qr_code_url,
+            expires_at: new Date(createdAt.getTime() + 15 * 60 * 1000).toISOString(),
+            is_existing: true
+          },
+          message: 'Using existing payment session'
+        });
+      } else {
+        // Payment expired, mark as failed and create new one
+        console.log('⏰ Existing payment expired, creating new one');
+        await supabase
+          .from('payments')
+          .update({ 
+            status: 'Failed', 
+            failure_reason: 'Payment timeout - expired after 15 minutes',
+            updated_at: new Date().toISOString()
+          })
+          .eq('payment_id', pendingPayment.payment_id);
+      }
     }
 
     // Generate unique order ID
@@ -495,6 +533,99 @@ export const checkPaymentStatus = async (req, res) => {
 };
 
 /**
+ * Manual complete payment (workaround for localhost IPN issue)
+ */
+export const manualCompletePayment = async (req, res) => {
+  try {
+    const { orderId, resultCode, amount, message } = req.body;
+
+    console.log('📝 Manual payment completion request:', { orderId, resultCode });
+
+    if (!orderId || !resultCode) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: orderId, resultCode'
+      });
+    }
+
+    // Only allow success result codes
+    if (resultCode !== '0') {
+      return res.status(400).json({
+        success: false,
+        error: 'Can only manually complete successful payments (resultCode=0)'
+      });
+    }
+
+    // Find payment record
+    const { data: payment, error: paymentError } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('order_id', orderId)
+      .single();
+
+    if (paymentError || !payment) {
+      console.error('❌ Payment not found:', orderId);
+      return res.status(404).json({
+        success: false,
+        error: 'Payment not found'
+      });
+    }
+
+    // Check if already completed
+    if (payment.status === 'Completed') {
+      console.log('ℹ️ Payment already completed');
+      return res.json({
+        success: true,
+        message: 'Payment already completed',
+        data: payment
+      });
+    }
+
+    // Update payment to Completed
+    const { data: updatedPayment, error: updateError } = await supabase
+      .from('payments')
+      .update({
+        status: 'Completed',
+        paid_at: new Date().toISOString()
+      })
+      .eq('payment_id', payment.payment_id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('❌ Failed to update payment:', updateError);
+      throw updateError;
+    }
+
+    console.log('✅ Payment manually completed:', payment.payment_id);
+
+    // Update charging session payment status
+    if (payment.session_id) {
+      await supabase
+        .from('charging_sessions')
+        .update({
+          payment_status: 'paid'
+        })
+        .eq('session_id', payment.session_id);
+    }
+
+    res.json({
+      success: true,
+      message: 'Payment manually completed successfully',
+      data: updatedPayment
+    });
+
+  } catch (error) {
+    console.error('Error manually completing payment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to complete payment',
+      message: error.message
+    });
+  }
+};
+
+/**
  * Get payment history for user
  */
 export const getUserPayments = async (req, res) => {
@@ -551,5 +682,6 @@ export default {
   createPaymentSession,
   handleMoMoIPN,
   checkPaymentStatus,
-  getUserPayments
+  getUserPayments,
+  manualCompletePayment
 };
