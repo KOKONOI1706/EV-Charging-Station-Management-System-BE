@@ -35,7 +35,7 @@ CREATE TABLE public.charging_points (
   point_id integer NOT NULL DEFAULT nextval('charging_points_point_id_seq'::regclass),
   connector_type_id integer,
   name character varying,
-  status character varying DEFAULT 'Available'::character varying,
+  status USER-DEFINED DEFAULT 'Available'::charging_status,
   power_kw numeric,
   price_rate numeric DEFAULT 0,
   idle_fee_per_min numeric DEFAULT 0,
@@ -64,6 +64,12 @@ CREATE TABLE public.charging_sessions (
   payment_id integer,
   status character varying DEFAULT 'Active'::character varying,
   created_at timestamp without time zone DEFAULT now(),
+  initial_battery_percent numeric,
+  target_battery_percent numeric DEFAULT 100.00,
+  estimated_completion_time timestamp with time zone,
+  battery_full_time timestamp with time zone,
+  idle_start_time timestamp with time zone,
+  auto_stopped boolean DEFAULT false,
   CONSTRAINT charging_sessions_pkey PRIMARY KEY (session_id),
   CONSTRAINT charging_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id),
   CONSTRAINT charging_sessions_vehicle_id_fkey FOREIGN KEY (vehicle_id) REFERENCES public.vehicles(vehicle_id),
@@ -142,9 +148,20 @@ CREATE TABLE public.payments (
   status character varying DEFAULT 'Pending'::character varying,
   external_reference character varying,
   created_at timestamp without time zone DEFAULT now(),
+  session_id integer,
+  order_id character varying UNIQUE,
+  payment_url text,
+  qr_code_url text,
+  momo_request_id character varying,
+  momo_signature character varying,
+  momo_response jsonb,
+  payment_method character varying DEFAULT 'momo'::character varying,
+  transaction_id character varying,
+  paid_at timestamp without time zone,
   CONSTRAINT payments_pkey PRIMARY KEY (payment_id),
   CONSTRAINT payments_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id),
-  CONSTRAINT payments_method_id_fkey FOREIGN KEY (method_id) REFERENCES public.payment_methods(method_id)
+  CONSTRAINT payments_method_id_fkey FOREIGN KEY (method_id) REFERENCES public.payment_methods(method_id),
+  CONSTRAINT payments_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.charging_sessions(session_id)
 );
 CREATE TABLE public.promotions (
   promotion_id integer NOT NULL DEFAULT nextval('promotions_promotion_id_seq'::regclass),
@@ -244,8 +261,10 @@ CREATE TABLE public.users (
   updated_at timestamp without time zone DEFAULT now(),
   is_active boolean DEFAULT true,
   password_hash character varying,
+  station_id uuid,
   CONSTRAINT users_pkey PRIMARY KEY (user_id),
-  CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(role_id)
+  CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(role_id),
+  CONSTRAINT fk_users_station FOREIGN KEY (station_id) REFERENCES public.stations(id)
 );
 CREATE TABLE public.vehicles (
   vehicle_id integer NOT NULL DEFAULT nextval('vehicles_vehicle_id_seq'::regclass),
@@ -254,6 +273,11 @@ CREATE TABLE public.vehicles (
   battery_capacity_kwh numeric,
   connector_type_id integer,
   created_at timestamp without time zone DEFAULT now(),
+  make character varying,
+  model character varying,
+  year integer,
+  color character varying,
+  updated_at timestamp without time zone DEFAULT now(),
   CONSTRAINT vehicles_pkey PRIMARY KEY (vehicle_id),
   CONSTRAINT vehicles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id),
   CONSTRAINT vehicles_connector_type_id_fkey FOREIGN KEY (connector_type_id) REFERENCES public.connector_types(connector_type_id)

@@ -630,24 +630,73 @@ export const manualCompletePayment = async (req, res) => {
 
     console.log('✅ Payment manually completed:', payment.payment_id);
 
-    // Update charging session status (payment_status column doesn't exist in DB)
+    // Update charging session with full completion data
     if (payment.session_id) {
-      const { data: updatedSession, error: sessionError } = await supabase
+      // Get current session to calculate final values
+      const { data: currentSession, error: fetchError } = await supabase
         .from('charging_sessions')
-        .update({
-          status: 'Completed'
-        })
+        .select(`
+          *,
+          charging_points (
+            power_kw,
+            stations (
+              price_per_kwh
+            )
+          )
+        `)
         .eq('session_id', payment.session_id)
-        .select()
         .single();
-      
-      if (sessionError) {
-        console.error('❌ Failed to update session status:', sessionError);
-        console.error('Session ID:', payment.session_id);
-        // Don't throw - payment is already completed, just log the error
+
+      if (fetchError || !currentSession) {
+        console.error('❌ Failed to fetch session for completion:', fetchError);
       } else {
-        console.log('✅ Charging session marked as Completed:', payment.session_id);
-        console.log('Updated session:', updatedSession);
+        // Calculate final values based on elapsed time
+        const now = new Date();
+        let startTimeStr = currentSession.start_time;
+        if (typeof startTimeStr === 'string' && !startTimeStr.endsWith('Z') && !startTimeStr.includes('+')) {
+          startTimeStr = startTimeStr + 'Z';
+        }
+        const startTime = new Date(startTimeStr);
+        const elapsedMs = now - startTime;
+        const elapsedHours = elapsedMs / (1000 * 60 * 60);
+
+        const chargingPowerKw = currentSession.charging_points?.power_kw || 7;
+        const energyConsumed = chargingPowerKw * elapsedHours;
+
+        // Calculate final meter reading
+        const meterEnd = currentSession.meter_start + energyConsumed;
+
+        // Calculate cost
+        let pricePerKwh = currentSession.charging_points?.stations?.price_per_kwh || 5000;
+        if (pricePerKwh < 10) {
+          pricePerKwh = pricePerKwh * 24000; // Convert USD to VND
+        }
+        const totalCost = energyConsumed * pricePerKwh;
+
+        const { data: updatedSession, error: sessionError } = await supabase
+          .from('charging_sessions')
+          .update({
+            status: 'Completed',
+            end_time: now.toISOString(),
+            meter_end: parseFloat(meterEnd.toFixed(2)),
+            energy_consumed_kwh: parseFloat(energyConsumed.toFixed(2)),
+            cost: Math.round(totalCost)
+          })
+          .eq('session_id', payment.session_id)
+          .select()
+          .single();
+        
+        if (sessionError) {
+          console.error('❌ Failed to update session status:', sessionError);
+          console.error('Session ID:', payment.session_id);
+        } else {
+          console.log('✅ Charging session completed with full data:', {
+            session_id: updatedSession.session_id,
+            energy_consumed_kwh: updatedSession.energy_consumed_kwh,
+            cost: updatedSession.cost,
+            meter_end: updatedSession.meter_end
+          });
+        }
       }
     }
 

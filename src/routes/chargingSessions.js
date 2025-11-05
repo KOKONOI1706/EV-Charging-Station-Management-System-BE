@@ -11,7 +11,9 @@ router.post('/', async (req, res) => {
       vehicle_id,
       point_id,
       booking_id,
-      meter_start
+      meter_start,
+      initial_battery_percent,  // ✅ NEW: Starting battery %
+      target_battery_percent    // ✅ NEW: Target battery % (default 100)
     } = req.body;
 
     // Validate required fields
@@ -20,6 +22,17 @@ router.post('/', async (req, res) => {
         success: false,
         error: 'Missing required fields: user_id, point_id, meter_start'
       });
+    }
+
+    // ✅ Validate initial_battery_percent (optional but recommended)
+    if (initial_battery_percent !== undefined) {
+      const batteryPercent = parseFloat(initial_battery_percent);
+      if (isNaN(batteryPercent) || batteryPercent < 0 || batteryPercent > 100) {
+        return res.status(400).json({
+          success: false,
+          error: 'initial_battery_percent must be between 0 and 100'
+        });
+      }
     }
 
     // Validate meter_start value - must be reasonable (0 to 10,000 kWh)
@@ -139,6 +152,29 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // ✅ Calculate estimated completion time if battery info provided
+    let estimatedCompletionTime = null;
+    if (initial_battery_percent !== undefined && vehicle_id) {
+      // Get vehicle battery capacity
+      const { data: vehicle } = await supabase
+        .from('vehicles')
+        .select('battery_capacity_kwh')
+        .eq('vehicle_id', vehicle_id)
+        .single();
+      
+      if (vehicle && vehicle.battery_capacity_kwh) {
+        const targetPercent = target_battery_percent || 100;
+        const percentToCharge = targetPercent - parseFloat(initial_battery_percent);
+        const energyNeeded = (percentToCharge / 100) * vehicle.battery_capacity_kwh;
+        const chargingPowerKw = chargingPoint.power_kw || 7;
+        const hoursNeeded = energyNeeded / chargingPowerKw;
+        
+        estimatedCompletionTime = new Date(Date.now() + hoursNeeded * 3600 * 1000).toISOString();
+        
+        console.log(`📊 Charging estimate: ${percentToCharge}% (${energyNeeded.toFixed(1)} kWh) in ${(hoursNeeded * 60).toFixed(0)} minutes`);
+      }
+    }
+
     // Create charging session
     const sessionData = {
       user_id,
@@ -146,7 +182,10 @@ router.post('/', async (req, res) => {
       point_id,
       booking_id: booking_id || null,
       start_time: new Date().toISOString(),
-      meter_start: parsedMeterStart, // Use validated value
+      meter_start: parsedMeterStart,
+      initial_battery_percent: initial_battery_percent || null,  // ✅ NEW
+      target_battery_percent: target_battery_percent || 100,      // ✅ NEW
+      estimated_completion_time: estimatedCompletionTime,         // ✅ NEW
       status: 'Active',
       created_at: new Date().toISOString()
     };
@@ -197,6 +236,23 @@ router.post('/', async (req, res) => {
       console.error('Failed to update charging point status:', updatePointError);
     } else {
       console.log(`✅ Charging point ${point_id} status updated to "In Use"`);
+    }
+
+    // ✅ Update booking status to "Active" if booking exists
+    if (booking_id) {
+      const { error: updateBookingError } = await supabase
+        .from('bookings')
+        .update({
+          status: 'Active',  // Booking is now in use
+          updated_at: new Date().toISOString()
+        })
+        .eq('booking_id', booking_id);
+
+      if (updateBookingError) {
+        console.error('Failed to update booking status:', updateBookingError);
+      } else {
+        console.log(`✅ Booking ${booking_id} status updated to "Active"`);
+      }
     }
 
     res.status(201).json({
@@ -473,8 +529,13 @@ router.put('/:id/stop', async (req, res) => {
     }
 
     // Calculate costs
-    const pricePerKwh = currentSession.charging_points.stations.price_per_kwh || 
+    // ⚠️ TEMPORARY FIX: Convert price from USD to VND if needed
+    let pricePerKwh = currentSession.charging_points.stations.price_per_kwh || 
                        currentSession.charging_points.price_rate || 5000;
+    if (pricePerKwh < 10) {
+      pricePerKwh = pricePerKwh * 24000; // Convert USD to VND
+      console.log(`⚠️ Stop session - Price converted: ${currentSession.charging_points.stations.price_per_kwh} USD -> ${pricePerKwh} VND`);
+    }
     const energyCost = energyConsumed * pricePerKwh;
     
     const idleFeePerMin = currentSession.charging_points.idle_fee_per_min || 1000;
@@ -492,6 +553,12 @@ router.put('/:id/stop', async (req, res) => {
       cost: totalCost,
       status: 'Completed'
     };
+
+    console.log('🛑 Stopping session:', {
+      session_id: id,
+      updateData,
+      user_id: currentSession.user_id
+    });
 
     const { data: session, error: updateError } = await supabase
       .from('charging_sessions')
@@ -511,8 +578,16 @@ router.put('/:id/stop', async (req, res) => {
       .single();
 
     if (updateError) {
+      console.error('❌ Failed to update session:', updateError);
       throw updateError;
     }
+
+    console.log('✅ Session stopped successfully:', {
+      session_id: session.session_id,
+      status: session.status,
+      energy_consumed: session.energy_consumed_kwh,
+      cost: session.cost
+    });
 
     // ✅ Update charging point status back to "Available"
     const { error: updatePointError } = await supabase
@@ -569,7 +644,7 @@ router.put('/:id/stop', async (req, res) => {
   }
 });
 
-// GET /api/charging-sessions/active/user/:userId - Get user's active session
+// GET /api/charging-sessions/active/user/:userId - Get user's active session with real-time calculation
 router.get('/active/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -619,16 +694,144 @@ router.get('/active/user/:userId', async (req, res) => {
       });
     }
 
-    // Calculate current session stats
+    // ✅ Calculate real-time stats on backend
     const now = new Date();
-    const startTime = new Date(session.start_time);
-    const durationMinutes = Math.floor((now - startTime) / 1000 / 60);
+    // 🔧 Ensure start_time is parsed as UTC by adding 'Z' if missing
+    let startTimeStr = session.start_time;
+    if (typeof startTimeStr === 'string' && !startTimeStr.endsWith('Z') && !startTimeStr.includes('+')) {
+      startTimeStr = startTimeStr + 'Z';
+    }
+    const startTime = new Date(startTimeStr);
+    const elapsedMs = now - startTime;
+    const elapsedHours = elapsedMs / (1000 * 60 * 60);
+    const durationMinutes = Math.floor(elapsedMs / (1000 * 60));
+
+    // Calculate energy consumed based on elapsed time
+    const chargingPowerKw = session.charging_points?.power_kw || 7; // Default 7kW
+    const energyConsumed = chargingPowerKw * elapsedHours;
+    
+    console.log('⏱️ Time calculation:', {
+      session_id: session.session_id,
+      now: now.toISOString(),
+      start_time: session.start_time,
+      elapsedMs,
+      elapsedHours: elapsedHours.toFixed(4),
+      durationMinutes,
+      chargingPowerKw,
+      energyConsumed: energyConsumed.toFixed(2)
+    });
+    
+    // ✅ Safety caps - consider initial battery level
+    const batteryCapacity = session.vehicles?.battery_capacity_kwh || 100;
+    const initialBatteryPercent = session.initial_battery_percent || 0;
+    const targetBatteryPercent = session.target_battery_percent || 100;
+    
+    // Maximum energy that can be charged = (target - initial) * capacity
+    const maxEnergyCanCharge = ((targetBatteryPercent - initialBatteryPercent) / 100) * batteryCapacity;
+    
+    // Cap energy: don't exceed what can be charged, and absolute max 200 kWh for safety
+    const cappedEnergy = Math.min(energyConsumed, maxEnergyCanCharge, 200);
+    
+    // Calculate current meter reading
+    const currentMeter = session.meter_start + cappedEnergy;
+    
+    // Calculate cost
+    // ⚠️ TEMPORARY FIX: Convert price from USD to VND if needed
+    // Database stores price in USD (e.g., 0.42) instead of VND (e.g., 10000)
+    // If price < 10, assume it's in USD and convert to VND (1 USD ≈ 24000 VND)
+    let pricePerKwh = session.charging_points?.stations?.price_per_kwh || 5000;
+    if (pricePerKwh < 10) {
+      pricePerKwh = pricePerKwh * 24000; // Convert USD to VND
+      console.log(`⚠️ Price converted: ${session.charging_points?.stations?.price_per_kwh} USD -> ${pricePerKwh} VND`);
+    }
+    const estimatedCost = cappedEnergy * pricePerKwh;
+    
+    // ✅ Calculate battery progress correctly
+    // Progress = initial_battery_percent + (energy added / battery capacity * 100)
+    let batteryProgress = 0;
+    if (session.vehicles?.battery_capacity_kwh) {
+      const percentAdded = (cappedEnergy / batteryCapacity) * 100;
+      batteryProgress = Math.min(initialBatteryPercent + percentAdded, targetBatteryPercent, 100);
+      
+      console.log('🔋 Battery Progress Calculation:', {
+        session_id: session.session_id,
+        initial_battery_percent: session.initial_battery_percent,
+        target_battery_percent: session.target_battery_percent,
+        initialBatteryPercent,
+        targetBatteryPercent,
+        energyConsumed: energyConsumed.toFixed(2),
+        maxEnergyCanCharge: maxEnergyCanCharge.toFixed(2),
+        cappedEnergy: cappedEnergy.toFixed(2),
+        battery_capacity: batteryCapacity,
+        percentAdded: percentAdded.toFixed(2),
+        batteryProgress: batteryProgress.toFixed(2)
+      });
+    }
+    
+    // Calculate charging rate (kW)
+    const chargingRate = elapsedHours > 0 ? cappedEnergy / elapsedHours : 0;
+
+    // ✅ Calculate estimated time remaining
+    let estimatedMinutesRemaining = null;
+    let estimatedCompletionTime = session.estimated_completion_time; // Keep original if exists
+    
+    if (session.vehicles?.battery_capacity_kwh && session.target_battery_percent !== undefined && session.initial_battery_percent !== undefined) {
+      const currentBatteryPercent = batteryProgress;
+      
+      if (currentBatteryPercent < targetBatteryPercent) {
+        const percentRemaining = targetBatteryPercent - currentBatteryPercent;
+        const energyRemaining = (percentRemaining / 100) * batteryCapacity;
+        const hoursRemaining = energyRemaining / chargingPowerKw;
+        estimatedMinutesRemaining = Math.ceil(hoursRemaining * 60);
+        
+        // Recalculate completion time based on current progress
+        estimatedCompletionTime = new Date(Date.now() + hoursRemaining * 3600 * 1000).toISOString();
+        
+        console.log('⏰ Time Remaining Calculation:', {
+          session_id: session.session_id,
+          currentBatteryPercent: currentBatteryPercent.toFixed(1),
+          targetBatteryPercent,
+          percentRemaining: percentRemaining.toFixed(1),
+          energyRemaining: energyRemaining.toFixed(2),
+          chargingPowerKw,
+          hoursRemaining: hoursRemaining.toFixed(4),
+          estimatedMinutesRemaining,
+          estimatedCompletionTime
+        });
+      } else {
+        // Already at or past target
+        estimatedMinutesRemaining = 0;
+        console.log('⏰ Time Remaining: Already at target', {
+          session_id: session.session_id,
+          currentBatteryPercent: currentBatteryPercent.toFixed(1),
+          targetBatteryPercent
+        });
+      }
+    } else {
+      console.log('⏰ Time Remaining: Cannot calculate - missing data', {
+        session_id: session.session_id,
+        has_vehicle: !!session.vehicles,
+        has_battery_capacity: !!session.vehicles?.battery_capacity_kwh,
+        has_target: session.target_battery_percent !== undefined,
+        has_initial: session.initial_battery_percent !== undefined
+      });
+    }
 
     res.json({
       success: true,
       data: {
         ...session,
-        current_duration_minutes: durationMinutes
+        // Real-time calculated values
+        current_duration_minutes: durationMinutes,
+        elapsed_hours: parseFloat(elapsedHours.toFixed(4)),
+        energy_consumed_kwh: parseFloat(cappedEnergy.toFixed(2)),
+        current_meter: parseFloat(currentMeter.toFixed(2)),
+        estimated_cost: Math.round(estimatedCost),
+        battery_progress: parseFloat(batteryProgress.toFixed(1)),
+        charging_rate_kw: parseFloat(chargingRate.toFixed(1)),
+        estimated_minutes_remaining: estimatedMinutesRemaining,
+        estimated_completion_time: estimatedCompletionTime,
+        calculation_timestamp: now.toISOString()
       }
     });
   } catch (error) {
