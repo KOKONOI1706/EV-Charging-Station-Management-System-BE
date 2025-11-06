@@ -1166,4 +1166,89 @@ router.get('/stats/summary', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/charging-sessions/:id/invoice
+ * Get or create invoice for a completed charging session
+ */
+router.post('/:id/invoice', async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id);
+
+    // Get the charging session
+    const { data: session, error: sessionError } = await supabase
+      .from('charging_sessions')
+      .select('session_id, user_id, cost, status, payment_id')
+      .eq('session_id', sessionId)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Charging session not found'
+      });
+    }
+
+    // Check if session is completed
+    if (session.status !== 'Completed') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invoice can only be generated for completed sessions'
+      });
+    }
+
+    // Check if invoice already exists
+    const { data: existingInvoice, error: invoiceCheckError } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('session_id', sessionId)
+      .maybeSingle();
+
+    if (invoiceCheckError) {
+      console.error('Error checking invoice:', invoiceCheckError);
+      throw invoiceCheckError;
+    }
+
+    // Return existing invoice if found
+    if (existingInvoice) {
+      return res.json({
+        success: true,
+        data: existingInvoice,
+        message: 'Invoice retrieved successfully'
+      });
+    }
+
+    // Create new invoice
+    const { data: newInvoice, error: createError } = await supabase
+      .from('invoices')
+      .insert([{
+        user_id: session.user_id,
+        session_id: sessionId,
+        payment_id: session.payment_id,
+        total_amount: session.cost,
+        status: 'Issued'
+      }])
+      .select()
+      .single();
+
+    if (createError) {
+      console.error('Error creating invoice:', createError);
+      throw createError;
+    }
+
+    res.status(201).json({
+      success: true,
+      data: newInvoice,
+      message: 'Invoice created successfully'
+    });
+
+  } catch (error) {
+    console.error('Error handling invoice:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to handle invoice',
+      message: error.message
+    });
+  }
+});
+
 export default router;
