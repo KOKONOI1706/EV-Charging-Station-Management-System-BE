@@ -1,7 +1,12 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Only admins may manage user-station assignments
+router.use(authenticateToken);
+router.use(requireAdmin);
 
 /**
  * GET /api/user-stations/:userId

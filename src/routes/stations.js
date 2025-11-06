@@ -1,5 +1,6 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -101,7 +102,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/stations - Create new station (admin only)
-router.post('/', async (req, res) => {
+router.post('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const stationData = {
       ...req.body,
@@ -224,7 +225,7 @@ router.post('/search', async (req, res) => {
 });
 
 // PUT /api/stations/:id - Update station (admin only)
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = {
@@ -265,7 +266,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // PUT /api/stations/:id/availability - Update station availability
-router.put('/:id/availability', async (req, res) => {
+router.put('/:id/availability', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { change } = req.body; // +1 or -1
@@ -322,7 +323,7 @@ router.put('/:id/availability', async (req, res) => {
 });
 
 // DELETE /api/stations/:id - Delete station (admin only)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

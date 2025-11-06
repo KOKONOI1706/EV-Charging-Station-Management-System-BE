@@ -1,7 +1,12 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import { authenticateToken, requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Require authenticated users for charging session operations
+router.use(authenticateToken);
+router.use(requireAuth);
 
 // POST /api/charging-sessions - Start a new charging session
 router.post('/', async (req, res) => {

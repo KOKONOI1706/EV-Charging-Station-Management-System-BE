@@ -1,7 +1,12 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import { authenticateToken, requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Require authenticated user for reservation actions
+router.use(authenticateToken);
+router.use(requireAuth);
 
 // POST /api/reservations - Create a new reservation
 router.post('/', async (req, res) => {
