@@ -16,6 +16,11 @@ router.get('/', async (req, res) => {
           id,
           name,
           address
+        ),
+        connector_types (
+          connector_type_id,
+          code,
+          name
         )
       `)
       .order('point_id', { ascending: true });
@@ -65,6 +70,11 @@ router.get('/:id', async (req, res) => {
           city,
           lat,
           lng
+        ),
+        connector_types (
+          connector_type_id,
+          code,
+          name
         )
       `)
       .eq('point_id', id)
