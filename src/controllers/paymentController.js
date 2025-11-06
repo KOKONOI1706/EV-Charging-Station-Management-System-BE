@@ -701,6 +701,14 @@ export const manualCompletePayment = async (req, res) => {
         }
         const totalCost = energyConsumed * pricePerKwh;
 
+        const finalCost = payment.amount || Math.round(totalCost);
+        
+        console.log('💰 Cost comparison:', {
+          payment_amount: payment.amount,
+          calculated_cost: Math.round(totalCost),
+          using_amount: finalCost
+        });
+
         const { data: updatedSession, error: sessionError } = await supabase
           .from('charging_sessions')
           .update({
@@ -708,7 +716,7 @@ export const manualCompletePayment = async (req, res) => {
             end_time: now.toISOString(),
             meter_end: parseFloat(meterEnd.toFixed(2)),
             energy_consumed_kwh: parseFloat(energyConsumed.toFixed(2)),
-            cost: Math.round(totalCost)
+            cost: finalCost 
           })
           .eq('session_id', payment.session_id)
           .select()
