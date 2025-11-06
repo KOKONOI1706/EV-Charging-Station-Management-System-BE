@@ -1,7 +1,12 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import { authenticateToken, requireAdminOrStaff } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Protect analytics: allow only admin or staff
+router.use(authenticateToken);
+router.use(requireAdminOrStaff);
 
 // GET /api/analytics/overview - Get general analytics overview
 router.get('/overview', async (req, res) => {
