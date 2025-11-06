@@ -1,7 +1,150 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import sessionManagementService from '../services/sessionManagementService.js';
 
 const router = express.Router();
+
+/**
+ * ========================================
+ * NEW ENDPOINTS: Session Management
+ * ========================================
+ */
+
+/**
+ * POST /api/charging-sessions/from-reservation
+ * Start charging session from a valid reservation
+ */
+router.post('/from-reservation', async (req, res) => {
+  try {
+    const {
+      userId,
+      pointId,
+      reservationId,
+      vehicleId,
+      meterStart,
+      initialBatteryPercent,
+      targetBatteryPercent
+    } = req.body;
+
+    if (!userId || !pointId || !reservationId || meterStart === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userId, pointId, reservationId, meterStart'
+      });
+    }
+
+    const result = await sessionManagementService.startSession({
+      userId,
+      pointId,
+      reservationId,
+      vehicleId,
+      meterStart,
+      initialBatteryPercent,
+      targetBatteryPercent: targetBatteryPercent || 100
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Error starting session from reservation:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/charging-sessions/direct
+ * Start charging session directly (without reservation)
+ */
+router.post('/direct', async (req, res) => {
+  try {
+    const {
+      userId,
+      pointId,
+      vehicleId,
+      meterStart,
+      initialBatteryPercent,
+      targetBatteryPercent
+    } = req.body;
+
+    if (!userId || !pointId || meterStart === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userId, pointId, meterStart'
+      });
+    }
+
+    const result = await sessionManagementService.startSession({
+      userId,
+      pointId,
+      reservationId: null,
+      vehicleId,
+      meterStart,
+      initialBatteryPercent,
+      targetBatteryPercent: targetBatteryPercent || 100
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Error starting direct session:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/charging-sessions/:id/stop
+ * Stop an active charging session
+ */
+router.post('/:id/stop', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, meterEnd, idleMinutes } = req.body;
+
+    if (!userId || meterEnd === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userId, meterEnd'
+      });
+    }
+
+    const result = await sessionManagementService.stopSession({
+      sessionId: parseInt(id),
+      userId,
+      meterEnd,
+      idleMinutes: idleMinutes || 0
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error stopping session:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * ========================================
+ * EXISTING ENDPOINTS (Legacy)
+ * ========================================
+ */
 
 // POST /api/charging-sessions - Start a new charging session
 router.post('/', async (req, res) => {
@@ -72,6 +215,43 @@ router.post('/', async (req, res) => {
         success: false,
         error: `Charging point is not ready. Current status: ${chargingPoint.status}`
       });
+    }
+
+    // ✅ Check if user already has ANY active session (regardless of point)
+    const { data: userActiveSessions, error: userSessionError } = await supabase
+      .from('charging_sessions')
+      .select('session_id, point_id, start_time')
+      .eq('user_id', user_id)
+      .eq('status', 'Active')
+      .limit(1);
+
+    if (userSessionError) {
+      throw userSessionError;
+    }
+
+    if (userActiveSessions && userActiveSessions.length > 0) {
+      const userActiveSession = userActiveSessions[0];
+      console.log(`⚠️ User ${user_id} already has an active session ${userActiveSession.session_id} on point ${userActiveSession.point_id}, auto-stopping...`);
+      
+      // Auto-stop the user's old session
+      await supabase
+        .from('charging_sessions')
+        .update({
+          end_time: new Date().toISOString(),
+          meter_end: meter_start, // Use new start as old end (approximate)
+          status: 'Completed',
+          energy_consumed_kwh: 0, // No consumption recorded
+          cost: 0
+        })
+        .eq('session_id', userActiveSession.session_id);
+      
+      console.log(`✅ User's old session ${userActiveSession.session_id} auto-stopped`);
+      
+      // Also update the old charging point back to Available
+      await supabase
+        .from('charging_points')
+        .update({ status: 'Available' })
+        .eq('point_id', userActiveSession.point_id);
     }
 
     // Check if there's an active session on this point
@@ -190,6 +370,8 @@ router.post('/', async (req, res) => {
       created_at: new Date().toISOString()
     };
 
+    console.log('🔍 Session data to insert:', JSON.stringify(sessionData, null, 2));
+
     const { data: session, error: createError } = await supabase
       .from('charging_sessions')
       .insert([sessionData])
@@ -209,24 +391,23 @@ router.post('/', async (req, res) => {
           vehicle_id,
           plate_number,
           battery_capacity_kwh
-        ),
-        bookings (
-          booking_id,
-          start_time,
-          expire_time
         )
       `)
       .single();
 
     if (createError) {
+      console.error('❌ Error creating session:', createError);
       throw createError;
     }
 
-    // ✅ Update charging point status to "In Use"
+    console.log(`✅ Session created successfully: ${session.session_id}`);
+
+    // ✅ Update charging point status to "InUse" (matches ENUM value)
+    console.log(`🔄 Updating charging point ${point_id} status to InUse...`);
     const { error: updatePointError } = await supabase
       .from('charging_points')
       .update({
-        status: 'In Use',
+        status: 'InUse',
         updated_at: new Date().toISOString(),
         last_seen_at: new Date().toISOString()
       })
@@ -235,7 +416,7 @@ router.post('/', async (req, res) => {
     if (updatePointError) {
       console.error('Failed to update charging point status:', updatePointError);
     } else {
-      console.log(`✅ Charging point ${point_id} status updated to "In Use"`);
+      console.log(`✅ Charging point ${point_id} status updated to "InUse"`);
     }
 
     // ✅ Update booking status to "Active" if booking exists
@@ -328,10 +509,6 @@ router.get('/', async (req, res) => {
           vehicle_id,
           plate_number,
           battery_capacity_kwh
-        ),
-        bookings (
-          booking_id,
-          start_time
         )
       `)
       .order('start_time', { ascending: false })
@@ -431,12 +608,6 @@ router.get('/:id', async (req, res) => {
           vehicle_id,
           plate_number,
           battery_capacity_kwh
-        ),
-        bookings (
-          booking_id,
-          start_time,
-          expire_time,
-          price_estimate
         ),
         payments (
           payment_id,
@@ -648,6 +819,17 @@ router.put('/:id/stop', async (req, res) => {
 router.get('/active/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
+    console.log(`🔍 Fetching active session for user ${userId} (type: ${typeof userId})...`);
+
+    // First, try a simple query without joins to see if session exists
+    const { data: simpleCheck, error: simpleError } = await supabase
+      .from('charging_sessions')
+      .select('session_id, user_id, point_id, status')
+      .eq('user_id', parseInt(userId))
+      .eq('status', 'Active')
+      .maybeSingle();
+
+    console.log(`🔍 Simple check result:`, simpleCheck, simpleError);
 
     const { data: session, error } = await supabase
       .from('charging_sessions')
@@ -669,30 +851,37 @@ router.get('/active/user/:userId', async (req, res) => {
           vehicle_id,
           plate_number,
           battery_capacity_kwh
-        ),
-        bookings (
-          booking_id,
-          start_time,
-          expire_time
         )
       `)
-      .eq('user_id', userId)
+      .eq('user_id', parseInt(userId))
       .eq('status', 'Active')
       .order('start_time', { ascending: false })
       .limit(1)
       .maybeSingle();
 
+    console.log(`🔍 Query result:`, { 
+      userId, 
+      hasSession: !!session, 
+      sessionId: session?.session_id,
+      status: session?.status,
+      error: error?.message 
+    });
+
     if (error) {
+      console.error(`❌ Error fetching session for user ${userId}:`, error);
       throw error;
     }
 
     if (!session) {
+      console.log(`⚠️ No active session found for user ${userId}`);
       return res.json({
         success: true,
         data: null,
         message: 'No active charging session found'
       });
     }
+
+    console.log(`✅ Found active session ${session.session_id} for user ${userId}`);
 
     // ✅ Calculate real-time stats on backend
     const now = new Date();

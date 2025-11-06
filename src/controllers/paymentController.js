@@ -642,6 +642,9 @@ export const manualCompletePayment = async (req, res) => {
             stations (
               price_per_kwh
             )
+          ),
+          vehicles (
+            battery_capacity_kwh
           )
         `)
         .eq('session_id', payment.session_id)
@@ -661,7 +664,32 @@ export const manualCompletePayment = async (req, res) => {
         const elapsedHours = elapsedMs / (1000 * 60 * 60);
 
         const chargingPowerKw = currentSession.charging_points?.power_kw || 7;
-        const energyConsumed = chargingPowerKw * elapsedHours;
+        let energyConsumed = chargingPowerKw * elapsedHours;
+
+        // ✅ Cap energy based on battery capacity and target percent
+        const batteryCapacity = currentSession.vehicles?.battery_capacity_kwh || 100;
+        const initialBatteryPercent = currentSession.initial_battery_percent || 0;
+        const targetBatteryPercent = currentSession.target_battery_percent || 100;
+        
+        // Maximum energy that can be charged from initial to target
+        const maxEnergyCanCharge = ((targetBatteryPercent - initialBatteryPercent) / 100) * batteryCapacity;
+        
+        // Cap energy - don't exceed what can actually be charged
+        const cappedEnergy = Math.min(energyConsumed, maxEnergyCanCharge, 200);
+        
+        console.log('💡 Payment completion - Energy calculation:', {
+          session_id: payment.session_id,
+          elapsed_hours: elapsedHours.toFixed(4),
+          raw_energy: energyConsumed.toFixed(2),
+          battery_capacity: batteryCapacity,
+          initial_percent: initialBatteryPercent,
+          target_percent: targetBatteryPercent,
+          max_energy_can_charge: maxEnergyCanCharge.toFixed(2),
+          final_capped_energy: cappedEnergy.toFixed(2)
+        });
+
+        // Use capped energy for final calculations
+        energyConsumed = cappedEnergy;
 
         // Calculate final meter reading
         const meterEnd = currentSession.meter_start + energyConsumed;
