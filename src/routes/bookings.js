@@ -73,14 +73,19 @@ router.get('/', async (req, res) => {
 // POST /api/bookings - Create new booking
 router.post('/', async (req, res) => {
   try {
+    // Use authenticated user id (do not trust client-provided user_id)
     const {
-      user_id,
       point_id,
       start_time,
       expire_time,
       promo_id,
       price_estimate
     } = req.body;
+
+    const user_id = req.user?.id || req.user?.user_id;
+    if (!user_id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
 
     // Validate required fields
     if (!user_id || !point_id || !start_time || !expire_time) {

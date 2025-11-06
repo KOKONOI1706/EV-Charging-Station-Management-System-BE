@@ -12,7 +12,6 @@ router.use(requireAuth);
 router.post('/', async (req, res) => {
   try {
     const {
-      user_id,
       station_id,
       charging_point_id,
       start_time,
@@ -21,6 +20,9 @@ router.post('/', async (req, res) => {
       payment_method = 'card',
       notes = ''
     } = req.body;
+
+    // Use authenticated user id (do not trust client-provided user_id)
+    const user_id = req.user?.id || req.user?.user_id;
 
     // Validate required fields
     if (!user_id || !station_id || !start_time || !end_time) {

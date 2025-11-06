@@ -155,7 +155,13 @@ router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
 router.post('/:id/reserve', authenticateToken, requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { user_id, reservation_id } = req.body;
+    // use authenticated user id rather than trusting client-provided user_id
+    const { reservation_id } = req.body;
+    const user_id = req.user?.id || req.user?.user_id;
+
+    if (!user_id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
 
     // Check if charging point exists and is available
     const { data: chargingPoint, error: fetchError } = await supabase
