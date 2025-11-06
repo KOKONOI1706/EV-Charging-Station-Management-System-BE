@@ -7,6 +7,8 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const { station_id, status } = req.query;
+    
+    console.log('🔍 GET /api/charging-points called with:', { station_id, status });
 
     let query = supabase
       .from('charging_points')
@@ -38,6 +40,9 @@ router.get('/', async (req, res) => {
     if (error) {
       throw error;
     }
+    
+    console.log(`✅ Returned ${chargingPoints.length} charging points`);
+    console.log('📊 Point IDs:', chargingPoints.map(p => p.point_id));
 
     res.json({
       success: true,

@@ -1,4 +1,4 @@
-import supabase from '../config/supabase.js';
+import supabase from '../supabase/client.js';
 
 /**
  * Reservation Status
@@ -19,15 +19,35 @@ class ReservationService {
    */
   async createReservation({ userId, pointId, durationMinutes = 15 }) {
     try {
+      // Ensure pointId is an integer
+      const pointIdInt = parseInt(pointId);
+      console.log('🔍 Creating reservation for:', { userId, pointId, pointIdInt, durationMinutes });
+      
+      // Debug: Check all charging points in database
+      const { data: allPoints } = await supabase
+        .from('charging_points')
+        .select('point_id, name, status, station_id')
+        .limit(20);
+      
+      console.log('🔍 Available charging points in database:', allPoints?.map(p => ({ 
+        id: p.point_id, 
+        name: p.name, 
+        status: p.status,
+        station: p.station_id 
+      })));
+      
       // 1. Check if point is available
       const { data: point, error: pointError } = await supabase
         .from('charging_points')
         .select('point_id, status, station_id')
-        .eq('point_id', pointId)
+        .eq('point_id', pointIdInt)
         .single();
 
+      console.log('📊 Query result:', { point, pointError });
+
       if (pointError) {
-        throw new Error('Charging point not found');
+        console.error('❌ Point lookup error:', pointError);
+        throw new Error(`Charging point ${pointIdInt} not found. Please check the charging point ID.`);
       }
 
       if (point.status !== 'Available') {
@@ -36,11 +56,11 @@ class ReservationService {
 
       // 2. Check if user has active reservation
       const { data: existingReservation } = await supabase
-        .from('reservations')
-        .select('reservation_id, point_id')
+        .from('bookings')
+        .select('booking_id, point_id')
         .eq('user_id', userId)
         .in('status', ['Confirmed', 'Active'])
-        .single();
+        .maybeSingle();
 
       if (existingReservation) {
         throw new Error('You already have an active reservation');
@@ -58,35 +78,60 @@ class ReservationService {
         throw new Error('You already have an active charging session');
       }
 
-      // 4. Create reservation
+      // 4. Create reservation (booking)
       const now = new Date();
       const expireTime = new Date(now.getTime() + durationMinutes * 60 * 1000);
 
+      console.log('🕐 Backend time calculation:', {
+        now: now.toISOString(),
+        nowLocal: now.toString(),
+        expireTime: expireTime.toISOString(),
+        expireTimeLocal: expireTime.toString(),
+        durationMinutes,
+        diffMs: expireTime.getTime() - now.getTime(),
+        diffMinutes: (expireTime.getTime() - now.getTime()) / 1000 / 60
+      });
+
       const { data: reservation, error: createError } = await supabase
-        .from('reservations')
+        .from('bookings')
         .insert([{
           user_id: userId,
-          point_id: pointId,
+          point_id: pointIdInt,
           station_id: point.station_id,
           start_time: now.toISOString(),
           expire_time: expireTime.toISOString(),
           status: 'Confirmed',
+          confirmed_at: now.toISOString(),
           created_at: now.toISOString()
         }])
-        .select(`
-          *,
-          charging_points (
-            *,
-            stations (*)
-          )
-        `)
+        .select()
         .single();
 
       if (createError) {
         throw createError;
       }
 
-      console.log(`✅ Reservation created: ${reservation.reservation_id} for user ${userId}`);
+      // 5. Update charging point status to Reserved
+      const { error: updatePointError } = await supabase
+        .from('charging_points')
+        .update({ 
+          status: 'Reserved',
+          updated_at: now.toISOString()
+        })
+        .eq('point_id', pointIdInt);
+
+      if (updatePointError) {
+        console.error('Failed to update point status:', updatePointError);
+        // Rollback reservation if point update fails
+        await supabase
+          .from('bookings')
+          .delete()
+          .eq('booking_id', reservation.booking_id);
+        throw new Error('Failed to reserve charging point');
+      }
+
+      console.log(`✅ Reservation created: ${reservation.booking_id} for user ${userId}`);
+      console.log(`🔒 Charging point ${pointIdInt} status changed to Reserved`);
       
       return {
         success: true,
@@ -109,9 +154,9 @@ class ReservationService {
     try {
       // Get reservation
       const { data: reservation, error: fetchError } = await supabase
-        .from('reservations')
+        .from('bookings')
         .select('*')
-        .eq('reservation_id', reservationId)
+        .eq('booking_id', reservationId)
         .eq('user_id', userId)
         .single();
 
@@ -125,12 +170,13 @@ class ReservationService {
 
       // Update status
       const { data: updated, error: updateError } = await supabase
-        .from('reservations')
+        .from('bookings')
         .update({ 
           status: 'Cancelled',
+          canceled_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
-        .eq('reservation_id', reservationId)
+        .eq('booking_id', reservationId)
         .select()
         .single();
 
@@ -138,7 +184,17 @@ class ReservationService {
         throw updateError;
       }
 
+      // Release the charging point
+      await supabase
+        .from('charging_points')
+        .update({ 
+          status: 'Available',
+          updated_at: new Date().toISOString()
+        })
+        .eq('point_id', reservation.point_id);
+
       console.log(`✅ Reservation cancelled: ${reservationId}`);
+      console.log(`🔓 Charging point ${reservation.point_id} released (Available)`);
 
       return {
         success: true,
@@ -160,14 +216,8 @@ class ReservationService {
   async getActiveReservation(userId) {
     try {
       const { data, error } = await supabase
-        .from('reservations')
-        .select(`
-          *,
-          charging_points (
-            *,
-            stations (*)
-          )
-        `)
+        .from('bookings')
+        .select('*')
         .eq('user_id', userId)
         .in('status', ['Confirmed', 'Active'])
         .order('start_time', { ascending: false })
@@ -199,8 +249,24 @@ class ReservationService {
     try {
       const now = new Date().toISOString();
 
+      // Get expired reservations before updating
+      const { data: expiredReservations, error: fetchError } = await supabase
+        .from('bookings')
+        .select('booking_id, point_id')
+        .eq('status', 'Confirmed')
+        .lt('expire_time', now);
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      if (!expiredReservations || expiredReservations.length === 0) {
+        return { success: true, expired: 0 };
+      }
+
+      // Update reservation status
       const { data, error } = await supabase
-        .from('reservations')
+        .from('bookings')
         .update({ status: 'Expired' })
         .eq('status', 'Confirmed')
         .lt('expire_time', now)
@@ -210,8 +276,21 @@ class ReservationService {
         throw error;
       }
 
+      // Release all charging points
+      const pointIds = expiredReservations.map(r => r.point_id);
+      if (pointIds.length > 0) {
+        await supabase
+          .from('charging_points')
+          .update({ 
+            status: 'Available',
+            updated_at: new Date().toISOString()
+          })
+          .in('point_id', pointIds);
+      }
+
       if (data && data.length > 0) {
         console.log(`⏰ Auto-expired ${data.length} reservations`);
+        console.log(`🔓 Released ${pointIds.length} charging points`);
       }
 
       return {
