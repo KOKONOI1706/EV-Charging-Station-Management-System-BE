@@ -184,22 +184,60 @@ export const createPaymentSession = async (req, res) => {
     }
 
     // Check if payment already exists
-    const { data: existingPayment } = await supabase
+    const { data: existingPayments } = await supabase
       .from('payments')
       .select('*')
       .eq('session_id', session_id)
-      .eq('status', 'Pending')
-      .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no record
+      .in('status', ['Pending', 'Completed']);
 
-    if (existingPayment) {
-      console.log('⚠️ Payment already exists:', existingPayment.payment_id);
+    // If there's a completed payment, don't allow creating another one
+    const completedPayment = existingPayments?.find(p => p.status === 'Completed');
+    if (completedPayment) {
+      console.log('❌ Payment already completed:', completedPayment.payment_id);
       return res.status(409).json({
         success: false,
-        error: 'Payment already exists for this session',
-        payment_id: existingPayment.payment_id,
-        order_id: existingPayment.order_id,
-        payment_url: existingPayment.payment_url
+        error: 'Payment already completed for this session',
+        payment_id: completedPayment.payment_id,
+        status: 'Completed'
       });
+    }
+
+    // If there's a pending payment, check if it's still valid (created within last 15 minutes)
+    const pendingPayment = existingPayments?.find(p => p.status === 'Pending');
+    if (pendingPayment) {
+      const createdAt = new Date(pendingPayment.created_at);
+      const now = new Date();
+      const minutesElapsed = (now - createdAt) / (1000 * 60);
+      
+      // If payment is still valid (< 15 minutes old), return existing payment URL
+      if (minutesElapsed < 15 && pendingPayment.payment_url) {
+        console.log('✅ Returning existing payment URL (still valid):', pendingPayment.payment_id);
+        return res.json({
+          success: true,
+          data: {
+            payment_id: pendingPayment.payment_id,
+            order_id: pendingPayment.order_id,
+            amount: pendingPayment.amount,
+            currency: pendingPayment.currency,
+            payment_url: pendingPayment.payment_url,
+            qrCodeUrl: pendingPayment.qr_code_url,
+            expires_at: new Date(createdAt.getTime() + 15 * 60 * 1000).toISOString(),
+            is_existing: true
+          },
+          message: 'Using existing payment session'
+        });
+      } else {
+        // Payment expired, mark as failed and create new one
+        console.log('⏰ Existing payment expired, creating new one');
+        await supabase
+          .from('payments')
+          .update({ 
+            status: 'Failed', 
+            failure_reason: 'Payment timeout - expired after 15 minutes',
+            updated_at: new Date().toISOString()
+          })
+          .eq('payment_id', pendingPayment.payment_id);
+      }
     }
 
     // Generate unique order ID
@@ -495,6 +533,226 @@ export const checkPaymentStatus = async (req, res) => {
 };
 
 /**
+ * Manual complete payment (workaround for localhost IPN issue)
+ */
+export const manualCompletePayment = async (req, res) => {
+  try {
+    const { orderId, resultCode, amount, message } = req.body;
+
+    console.log('📝 Manual payment completion request:', { orderId, resultCode });
+
+    if (!orderId || !resultCode) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: orderId, resultCode'
+      });
+    }
+
+    // Only allow success result codes
+    if (resultCode !== '0') {
+      return res.status(400).json({
+        success: false,
+        error: 'Can only manually complete successful payments (resultCode=0)'
+      });
+    }
+
+    // Find payment record
+    const { data: payment, error: paymentError } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('order_id', orderId)
+      .single();
+
+    if (paymentError || !payment) {
+      console.error('❌ Payment not found:', orderId);
+      return res.status(404).json({
+        success: false,
+        error: 'Payment not found'
+      });
+    }
+
+    // Check if already completed
+    if (payment.status === 'Completed') {
+      console.log('ℹ️ Payment already completed');
+      
+      // Even if payment is completed, ensure session is also marked as completed
+      if (payment.session_id) {
+        const { data: sessionCheck } = await supabase
+          .from('charging_sessions')
+          .select('status')
+          .eq('session_id', payment.session_id)
+          .single();
+        
+        // Update session if it's still Active
+        if (sessionCheck && sessionCheck.status === 'Active') {
+          const { data: fixed, error: fixError } = await supabase
+            .from('charging_sessions')
+            .update({
+              status: 'Completed'
+            })
+            .eq('session_id', payment.session_id)
+            .select()
+            .single();
+          
+          if (fixError) {
+            console.error('❌ Failed to fix session status:', fixError);
+          } else {
+            console.log('✅ Session status fixed to Completed:', payment.session_id);
+            console.log('Fixed session:', fixed);
+          }
+        } else {
+          console.log('ℹ️ Session already completed or not found:', sessionCheck?.status);
+        }
+      }
+      
+      return res.json({
+        success: true,
+        message: 'Payment already completed',
+        data: payment
+      });
+    }
+
+    // Update payment to Completed
+    const { data: updatedPayment, error: updateError } = await supabase
+      .from('payments')
+      .update({
+        status: 'Completed',
+        paid_at: new Date().toISOString()
+      })
+      .eq('payment_id', payment.payment_id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('❌ Failed to update payment:', updateError);
+      throw updateError;
+    }
+
+    console.log('✅ Payment manually completed:', payment.payment_id);
+
+    // Update charging session with full completion data
+    if (payment.session_id) {
+      // Get current session to calculate final values
+      const { data: currentSession, error: fetchError } = await supabase
+        .from('charging_sessions')
+        .select(`
+          *,
+          charging_points (
+            power_kw,
+            stations (
+              price_per_kwh
+            )
+          ),
+          vehicles (
+            battery_capacity_kwh
+          )
+        `)
+        .eq('session_id', payment.session_id)
+        .single();
+
+      if (fetchError || !currentSession) {
+        console.error('❌ Failed to fetch session for completion:', fetchError);
+      } else {
+        // Calculate final values based on elapsed time
+        const now = new Date();
+        let startTimeStr = currentSession.start_time;
+        if (typeof startTimeStr === 'string' && !startTimeStr.endsWith('Z') && !startTimeStr.includes('+')) {
+          startTimeStr = startTimeStr + 'Z';
+        }
+        const startTime = new Date(startTimeStr);
+        const elapsedMs = now - startTime;
+        const elapsedHours = elapsedMs / (1000 * 60 * 60);
+
+        const chargingPowerKw = currentSession.charging_points?.power_kw || 7;
+        let energyConsumed = chargingPowerKw * elapsedHours;
+
+        // ✅ Cap energy based on battery capacity and target percent
+        const batteryCapacity = currentSession.vehicles?.battery_capacity_kwh || 100;
+        const initialBatteryPercent = currentSession.initial_battery_percent || 0;
+        const targetBatteryPercent = currentSession.target_battery_percent || 100;
+        
+        // Maximum energy that can be charged from initial to target
+        const maxEnergyCanCharge = ((targetBatteryPercent - initialBatteryPercent) / 100) * batteryCapacity;
+        
+        // Cap energy - don't exceed what can actually be charged
+        const cappedEnergy = Math.min(energyConsumed, maxEnergyCanCharge, 200);
+        
+        console.log('💡 Payment completion - Energy calculation:', {
+          session_id: payment.session_id,
+          elapsed_hours: elapsedHours.toFixed(4),
+          raw_energy: energyConsumed.toFixed(2),
+          battery_capacity: batteryCapacity,
+          initial_percent: initialBatteryPercent,
+          target_percent: targetBatteryPercent,
+          max_energy_can_charge: maxEnergyCanCharge.toFixed(2),
+          final_capped_energy: cappedEnergy.toFixed(2)
+        });
+
+        // Use capped energy for final calculations
+        energyConsumed = cappedEnergy;
+
+        // Calculate final meter reading
+        const meterEnd = currentSession.meter_start + energyConsumed;
+
+        // Calculate cost
+        let pricePerKwh = currentSession.charging_points?.stations?.price_per_kwh || 5000;
+        if (pricePerKwh < 10) {
+          pricePerKwh = pricePerKwh * 24000; // Convert USD to VND
+        }
+        const totalCost = energyConsumed * pricePerKwh;
+
+        const finalCost = payment.amount || Math.round(totalCost);
+        
+        console.log('💰 Cost comparison:', {
+          payment_amount: payment.amount,
+          calculated_cost: Math.round(totalCost),
+          using_amount: finalCost
+        });
+
+        const { data: updatedSession, error: sessionError } = await supabase
+          .from('charging_sessions')
+          .update({
+            status: 'Completed',
+            end_time: now.toISOString(),
+            meter_end: parseFloat(meterEnd.toFixed(2)),
+            energy_consumed_kwh: parseFloat(energyConsumed.toFixed(2)),
+            cost: finalCost 
+          })
+          .eq('session_id', payment.session_id)
+          .select()
+          .single();
+        
+        if (sessionError) {
+          console.error('❌ Failed to update session status:', sessionError);
+          console.error('Session ID:', payment.session_id);
+        } else {
+          console.log('✅ Charging session completed with full data:', {
+            session_id: updatedSession.session_id,
+            energy_consumed_kwh: updatedSession.energy_consumed_kwh,
+            cost: updatedSession.cost,
+            meter_end: updatedSession.meter_end
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Payment manually completed successfully',
+      data: updatedPayment
+    });
+
+  } catch (error) {
+    console.error('Error manually completing payment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to complete payment',
+      message: error.message
+    });
+  }
+};
+
+/**
  * Get payment history for user
  */
 export const getUserPayments = async (req, res) => {
@@ -551,5 +809,6 @@ export default {
   createPaymentSession,
   handleMoMoIPN,
   checkPaymentStatus,
-  getUserPayments
+  getUserPayments,
+  manualCompletePayment
 };

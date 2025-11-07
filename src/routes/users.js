@@ -7,10 +7,18 @@ import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from 
 
 const router = express.Router();
 
-// GET /api/users - Get all users (admin only)
+// GET /api/users - Get all users with pagination and stats (admin only)
 router.get('/', async (req, res) => {
   try {
-    const { data: users, error } = await supabaseAdmin
+    // Get pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+    const role = req.query.role; // Optional role filter
+    const search = req.query.search; // Optional search term
+
+    // Build query
+    let query = supabaseAdmin
       .from('users')
       .select(`
         user_id,
@@ -20,14 +28,64 @@ router.get('/', async (req, res) => {
         created_at,
         is_active,
         roles!inner(name)
-      `)
+      `, { count: 'exact' })
       .eq('is_active', true);
+
+    // Add role filter if provided
+    if (role) {
+      const roleMapping = {
+        'customer': 'Driver',
+        'staff': 'Station Manager',
+        'admin': 'Admin'
+      };
+      const dbRoleName = roleMapping[role];
+      if (dbRoleName) {
+        query = query.eq('roles.name', dbRoleName);
+      }
+    }
+
+    // Add search filter if provided
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+    }
+
+    // Apply pagination
+    query = query.range(offset, offset + limit - 1).order('created_at', { ascending: false });
+
+    const { data: users, error, count } = await query;
 
     if (error) {
       return res.status(500).json({
         success: false,
         error: 'Database error',
         message: error.message
+      });
+    }
+
+    // Get charging session statistics for all users
+    const userIds = users.map(u => u.user_id);
+    const { data: sessionStats, error: statsError } = await supabaseAdmin
+      .from('charging_sessions')
+      .select('user_id, cost')
+      .in('user_id', userIds)
+      .eq('status', 'Completed');
+
+    if (statsError) {
+      console.error('Error fetching session stats:', statsError);
+    }
+
+    // Calculate stats per user
+    const userStatsMap = {};
+    if (sessionStats) {
+      sessionStats.forEach(session => {
+        if (!userStatsMap[session.user_id]) {
+          userStatsMap[session.user_id] = {
+            totalSessions: 0,
+            totalSpent: 0
+          };
+        }
+        userStatsMap[session.user_id].totalSessions++;
+        userStatsMap[session.user_id].totalSpent += parseFloat(session.cost) || 0;
       });
     }
 
@@ -39,22 +97,30 @@ router.get('/', async (req, res) => {
     };
     
     // Transform data to match frontend expectations
-    const transformedUsers = users.map(user => ({
-      id: user.user_id.toString(),
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: roleMapping[user.roles.name] || 'customer',
-      createdAt: user.created_at,
-      isActive: user.is_active
-    }));
+    const transformedUsers = users.map(user => {
+      const stats = userStatsMap[user.user_id] || { totalSessions: 0, totalSpent: 0 };
+      return {
+        id: user.user_id.toString(),
+        name: user.name,
+        email: user.email,
+        phone: user.phone || '',
+        role: roleMapping[user.roles.name] || 'customer',
+        memberSince: new Date(user.created_at).toISOString().split('T')[0],
+        totalSessions: stats.totalSessions,
+        totalSpent: stats.totalSpent,
+        status: user.is_active ? 'Active' : 'Inactive'
+      };
+    });
 
     res.json({
       success: true,
-      data: transformedUsers,
-      total: transformedUsers.length
+      users: transformedUsers,
+      total: count || 0,
+      page,
+      limit
     });
   } catch (error) {
+    console.error('Failed to fetch users:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch users',

@@ -21,6 +21,9 @@ router.post('/momo/ipn', paymentController.handleMoMoIPN);
 // GET /api/payments/momo/status/:orderId - Check MoMo payment status
 router.get('/momo/status/:orderId', paymentController.checkPaymentStatus);
 
+// POST /api/payments/momo/manual-complete - Manual complete payment (workaround for localhost)
+router.post('/momo/manual-complete', paymentController.manualCompletePayment);
+
 // GET /api/payments/user/:userId - Get user's payment history
 router.get('/user/:userId', paymentController.getUserPayments);
 

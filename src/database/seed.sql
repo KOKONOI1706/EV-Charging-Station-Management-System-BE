@@ -112,23 +112,23 @@ INSERT INTO charging_points (station_id, connector_type_id, name, status, power_
 (5, 2, 'Highway CHAdeMO', 'Available', 150.00, 9500, 1500),
 (5, 4, 'Highway Tesla', 'Available', 250.00, 10500, 1800);
 
--- Insert sample bookings
+-- Insert sample bookings (Updated to 2025)
 INSERT INTO bookings (user_id, point_id, start_time, expire_time, status, confirmed_at, price_estimate) VALUES
-(1, 1, '2024-12-20 14:00:00', '2024-12-20 16:00:00', 'Completed', '2024-12-20 13:30:00', 170000),
-(4, 15, '2024-12-21 10:30:00', '2024-12-21 11:30:00', 'Completed', '2024-12-21 10:00:00', 90000),
-(5, 25, '2024-12-22 09:00:00', '2024-12-22 11:00:00', 'Confirmed', '2024-12-22 08:30:00', 140000),
-(1, 33, '2024-12-23 16:00:00', '2024-12-23 18:00:00', 'Pending', NULL, 220000);
+(1, 1, '2025-01-10 14:00:00', '2025-01-10 16:00:00', 'Completed', '2025-01-10 13:30:00', 170000),
+(4, 15, '2025-01-11 10:30:00', '2025-01-11 11:30:00', 'Completed', '2025-01-11 10:00:00', 90000),
+(5, 25, '2025-01-12 09:00:00', '2025-01-12 11:00:00', 'Confirmed', '2025-01-12 08:30:00', 140000),
+(1, 33, '2025-01-15 16:00:00', '2025-01-15 18:00:00', 'Pending', NULL, 220000);
 
--- Insert sample charging sessions
+-- Insert sample charging sessions (Updated to 2025)
 INSERT INTO charging_sessions (user_id, vehicle_id, point_id, booking_id, start_time, end_time, meter_start, meter_end, energy_consumed_kwh, cost, status) VALUES
-(1, 1, 1, 1, '2024-12-20 14:05:00', '2024-12-20 15:50:00', 1000.0000, 1048.5000, 48.5000, 165000, 'Completed'),
-(4, 2, 15, 2, '2024-12-21 10:35:00', '2024-12-21 11:25:00', 500.0000, 528.5000, 28.5000, 85500, 'Completed');
+(1, 1, 1, 1, '2025-01-10 14:05:00', '2025-01-10 15:50:00', 1000.0000, 1048.5000, 48.5000, 165000, 'Completed'),
+(4, 2, 15, 2, '2025-01-11 10:35:00', '2025-01-11 11:25:00', 500.0000, 528.5000, 28.5000, 85500, 'Completed');
 
--- Insert sample payments
+-- Insert sample payments (Updated to 2025)
 INSERT INTO payments (user_id, method_id, amount, currency, status, external_reference) VALUES
-(1, 2, 165000, 'VND', 'Completed', 'TXN_20241220_001'),
-(4, 4, 85500, 'VND', 'Completed', 'MOMO_20241221_002'),
-(5, 3, 50000, 'VND', 'Pending', 'VNPAY_20241222_003');
+(1, 2, 165000, 'VND', 'Completed', 'TXN_20250110_001'),
+(4, 4, 85500, 'VND', 'Completed', 'MOMO_20250111_002'),
+(5, 3, 50000, 'VND', 'Pending', 'VNPAY_20250112_003');
 
 -- Insert sample feedbacks
 INSERT INTO feedbacks (user_id, station_id, rating, comment) VALUES

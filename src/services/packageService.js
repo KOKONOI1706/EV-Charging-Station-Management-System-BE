@@ -1,8 +1,8 @@
-import { supabaseAdmin } from "../config/supabase.js";
+import { supabase } from "../config/supabase.js";
 
 export const PackageService = {
   async getAll() {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("service_packages")
       .select("*")
       .order("created_at", { ascending: false });
@@ -18,7 +18,7 @@ export const PackageService = {
   },
 
   async getById(id) {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("service_packages")
       .select("*")
       .eq("package_id", id)
@@ -40,7 +40,7 @@ export const PackageService = {
     const benefitsJson =
       typeof benefits === "string" ? JSON.parse(benefits) : benefits;
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("service_packages")
       .insert([{ name, description, price, duration_days, benefits: benefitsJson, status }])
       .select()
@@ -55,7 +55,7 @@ export const PackageService = {
     const benefitsJson =
       typeof benefits === "string" ? JSON.parse(benefits) : benefits;
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("service_packages")
       .update({
         name,
@@ -74,7 +74,7 @@ export const PackageService = {
   },
 
   async delete(id) {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("service_packages")
       .delete()
       .eq("package_id", id)
