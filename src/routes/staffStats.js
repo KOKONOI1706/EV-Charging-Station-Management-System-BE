@@ -1,12 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticateToken, requireAdminOrStaff } from '../middleware/auth.js';
 
 const router = express.Router();
-
-// Protect staff stats: allow only admin or staff
-router.use(authenticateToken);
-router.use(requireAdminOrStaff);
 
 /**
  * GET /api/staff-stats/metrics

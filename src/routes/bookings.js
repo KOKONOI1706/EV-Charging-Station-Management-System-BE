@@ -1,12 +1,7 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
-import { authenticateToken, requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
-
-// Require authenticated user for all booking actions
-router.use(authenticateToken);
-router.use(requireAuth);
 
 // GET /api/bookings - Get all bookings for a user
 router.get('/', async (req, res) => {
@@ -73,19 +68,14 @@ router.get('/', async (req, res) => {
 // POST /api/bookings - Create new booking
 router.post('/', async (req, res) => {
   try {
-    // Use authenticated user id (do not trust client-provided user_id)
     const {
+      user_id,
       point_id,
       start_time,
       expire_time,
       promo_id,
       price_estimate
     } = req.body;
-
-    const user_id = req.user?.id || req.user?.user_id;
-    if (!user_id) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
 
     // Validate required fields
     if (!user_id || !point_id || !start_time || !expire_time) {

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import usersRouter from './routes/users.js';
 import stationsRouter from './routes/stations.js';
 import bookingsRouter from './routes/bookings.js';
+import reservationsRouter from './routes/reservations.js';
 import chargingPointsRouter from './routes/chargingPoints.js';
 import chargingSessionsRouter from './routes/chargingSessions.js';
 import paymentsRouter from './routes/payments.js';
@@ -16,7 +17,10 @@ import packageRoutes from './routes/packageRoutes.js';
 import vehiclesRouter from './routes/vehicles.js';
 import staffStatsRouter from './routes/staffStats.js';
 import userStationsRouter from './routes/userStations.js';
-import adminRouter from './routes/admin.js';
+import adminStatsRouter from './routes/adminStats.js';
+
+// Import scheduler
+import chargingScheduler from './services/chargingScheduler.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -67,6 +71,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/users', usersRouter);
 app.use('/api/stations', stationsRouter);
 app.use('/api/bookings', bookingsRouter);
+app.use('/api/reservations', reservationsRouter);
 app.use('/api/charging-points', chargingPointsRouter);
 app.use('/api/charging-sessions', chargingSessionsRouter);
 app.use('/api/payments', paymentsRouter);
@@ -75,7 +80,7 @@ app.use('/api/packages', packageRoutes);
 app.use('/api/vehicles', vehiclesRouter);
 app.use('/api/staff-stats', staffStatsRouter);
 app.use('/api/user-stations', userStationsRouter);
-app.use('/api/admin', adminRouter);
+app.use('/api/admin', adminStatsRouter);
 
 // ✅ Basic route with API information
 app.get('/', (req, res) => {
@@ -87,12 +92,19 @@ app.get('/', (req, res) => {
       users: '/api/users',
       stations: '/api/stations',
       bookings: '/api/bookings',
+      reservations: '/api/reservations',
       chargingPoints: '/api/charging-points',
       chargingSessions: '/api/charging-sessions',
       payments: '/api/payments',
       analytics: '/api/analytics',
       packages: '/api/packages',
       vehicles: '/api/vehicles'
+    },
+    features: {
+      scheduler: {
+        status: chargingScheduler.getStatus().isRunning ? 'Active' : 'Inactive',
+        tasks: ['Reservation expiry (30s)', 'AlmostDone detection (1min)']
+      }
     }
   });
 });
@@ -164,6 +176,26 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
+  
+  // ⚠️ Scheduler temporarily disabled due to permissions and table naming
+  // TODO: Update reservationService.js to use 'bookings' instead of 'reservations'
+  // TODO: Fix RLS permissions for scheduler queries
+  // console.log('🔄 Starting charging scheduler...');
+  // chargingScheduler.start();
+  console.log('⚠️  Scheduler disabled - Migration successful but needs service updates');
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('👋 SIGTERM received, shutting down gracefully');
+  chargingScheduler.stop();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('👋 SIGINT received, shutting down gracefully');
+  chargingScheduler.stop();
+  process.exit(0);
 });
 
 export default app;

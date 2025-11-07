@@ -1,182 +1,76 @@
 import express from 'express';
-import supabase from '../supabase/client.js';
-import { authenticateToken, requireAuth } from '../middleware/auth.js';
+import reservationService from '../services/reservationService.js';
+import supabase from '../config/supabase.js';
 
 const router = express.Router();
 
-// Require authenticated user for reservation actions
-router.use(authenticateToken);
-router.use(requireAuth);
-
-// POST /api/reservations - Create a new reservation
+/**
+ * POST /api/reservations
+ * Create a new reservation (NEW: Uses reservation service with auto-expiry)
+ */
 router.post('/', async (req, res) => {
   try {
-    const {
-      station_id,
-      charging_point_id,
-      start_time,
-      end_time,
-      total_cost,
-      payment_method = 'card',
-      notes = ''
-    } = req.body;
+    const { userId, pointId, durationMinutes } = req.body;
 
-    // Use authenticated user id (do not trust client-provided user_id)
-    const user_id = req.user?.id || req.user?.user_id;
-
-    // Validate required fields
-    if (!user_id || !station_id || !start_time || !end_time) {
+    if (!userId || !pointId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: user_id, station_id, start_time, end_time'
+        error: 'Missing required fields: userId, pointId'
       });
     }
 
-    // Check if specific charging point is requested and available
-    if (charging_point_id) {
-      const { data: chargingPoint, error: pointError } = await supabase
-        .from('charging_points')
-        .select('status, station_id')
-        .eq('point_id', charging_point_id)
-        .single();
-
-      if (pointError) {
-        return res.status(404).json({
-          success: false,
-          error: 'Charging point not found'
-        });
-      }
-
-      if (chargingPoint.station_id !== station_id) {
-        return res.status(400).json({
-          success: false,
-          error: 'Charging point does not belong to this station'
-        });
-      }
-
-      if (chargingPoint.status !== 'Available') {
-        return res.status(400).json({
-          success: false,
-          error: `Charging point is not available. Current status: ${chargingPoint.status}`
-        });
-      }
-    }
-
-    // Check if station exists and has availability
-    const { data: station, error: stationError } = await supabase
-      .from('stations')
-      .select('available_spots, total_spots, status')
-      .eq('id', station_id)
-      .single();
-
-    if (stationError) {
-      return res.status(404).json({
-        success: false,
-        error: 'Station not found'
-      });
-    }
-
-    if (station.status !== 'active' || station.available_spots <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Station is not available for reservation'
-      });
-    }
-
-    // Check for time conflicts
-    const { data: conflicts, error: conflictError } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('station_id', station_id)
-      .in('status', ['confirmed', 'active', 'pending'])
-      .or(
-        `and(start_time.lte.${start_time},end_time.gt.${start_time}),` +
-        `and(start_time.lt.${end_time},end_time.gte.${end_time}),` +
-        `and(start_time.gte.${start_time},end_time.lte.${end_time})`
-      );
-
-    if (conflictError) {
-      throw conflictError;
-    }
-
-    if (conflicts && conflicts.length > 0) {
-      return res.status(409).json({
-        success: false,
-        error: 'Time slot is already reserved',
-        conflicts
-      });
-    }
-
-    // Create reservation
-    const reservationData = {
-      user_id,
-      station_id,
-      charging_point_id: charging_point_id || null,
-      start_time,
-      end_time,
-      total_cost: parseFloat(total_cost) || 0,
-      payment_method,
-      notes,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
-
-    const { data: reservation, error: createError } = await supabase
-      .from('reservations')
-      .insert([reservationData])
-      .select(`
-        *,
-        stations (
-          id,
-          name,
-          address,
-          city,
-          power_kw,
-          connector,
-          price_per_kwh
-        )
-      `)
-      .single();
-
-    if (createError) {
-      throw createError;
-    }
-
-    // Update charging point status to Reserved if specific point was selected
-    if (charging_point_id) {
-      const { error: updatePointError } = await supabase
-        .from('charging_points')
-        .update({
-          status: 'Reserved',
-          updated_at: new Date().toISOString(),
-          last_seen_at: new Date().toISOString()
-        })
-        .eq('point_id', charging_point_id);
-
-      if (updatePointError) {
-        console.error('Failed to update charging point status:', updatePointError);
-        // Don't fail the reservation, just log the error
-      } else {
-        console.log(`✅ Charging point ${charging_point_id} status updated to Reserved`);
-      }
-    }
-
-    res.status(201).json({
-      success: true,
-      data: reservation,
-      message: 'Reservation created successfully'
+    const result = await reservationService.createReservation({
+      userId,
+      pointId,
+      durationMinutes: durationMinutes || 15
     });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.status(201).json(result);
   } catch (error) {
     console.error('Error creating reservation:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create reservation',
-      message: error.message
+      error: error.message
     });
   }
 });
 
-// GET /api/reservations/user/:userId - Get user's reservations
+/**
+ * GET /api/reservations/active
+ * Get user's active reservation (NEW)
+ */
+router.get('/active', async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing userId parameter'
+      });
+    }
+
+    const result = await reservationService.getActiveReservation(parseInt(userId));
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching active reservation:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// GET /api/reservations/user/:userId - Get user's reservations (UPDATED)
 router.get('/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -186,16 +80,17 @@ router.get('/user/:userId', async (req, res) => {
       .from('reservations')
       .select(`
         *,
-        stations (
-          id,
-          name,
-          address,
-          city,
+        charging_points (
+          point_id,
+          point_name,
+          connector_type,
           power_kw,
-          connector,
-          price_per_kwh,
-          lat,
-          lng
+          stations (
+            station_id,
+            name,
+            address,
+            price_per_kwh
+          )
         )
       `)
       .eq('user_id', userId)
@@ -386,80 +281,34 @@ router.put('/:id/status', async (req, res) => {
   }
 });
 
-// DELETE /api/reservations/:id - Cancel/Delete reservation
+/**
+ * DELETE /api/reservations/:id
+ * Cancel a reservation (UPDATED: Uses reservation service)
+ */
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const { userId } = req.body;
 
-    // Check if reservation exists and can be cancelled
-    const { data: reservation, error: fetchError } = await supabase
-      .from('reservations')
-      .select('status, start_time, charging_point_id')
-      .eq('id', id)
-      .single();
-
-    if (fetchError) {
-      if (fetchError.code === 'PGRST116') {
-        return res.status(404).json({
-          success: false,
-          error: 'Reservation not found'
-        });
-      }
-      throw fetchError;
-    }
-
-    // Check if reservation can be cancelled
-    if (['completed', 'active'].includes(reservation.status)) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        error: 'Cannot cancel active or completed reservations'
+        error: 'Missing userId in request body'
       });
     }
 
-    // Update status to cancelled instead of deleting
-    const { data: cancelledReservation, error: updateError } = await supabase
-      .from('reservations')
-      .update({
-        status: 'cancelled',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const result = await reservationService.cancelReservation(parseInt(id), parseInt(userId));
 
-    if (updateError) {
-      throw updateError;
+    if (!result.success) {
+      return res.status(400).json(result);
     }
 
-    // Release charging point if it was reserved
-    if (reservation.charging_point_id) {
-      const { error: releaseError } = await supabase
-        .from('charging_points')
-        .update({
-          status: 'Available',
-          updated_at: new Date().toISOString(),
-          last_seen_at: new Date().toISOString()
-        })
-        .eq('point_id', reservation.charging_point_id);
-
-      if (releaseError) {
-        console.error('Failed to release charging point:', releaseError);
-      } else {
-        console.log(`✅ Charging point ${reservation.charging_point_id} released and set to Available`);
-      }
-    }
-
-    res.json({
-      success: true,
-      data: cancelledReservation,
-      message: 'Reservation cancelled successfully'
-    });
+    res.json(result);
   } catch (error) {
     console.error('Error cancelling reservation:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to cancel reservation',
-      message: error.message
+      error: error.message
     });
   }
 });
@@ -474,27 +323,21 @@ router.get('/station/:stationId', async (req, res) => {
       .from('reservations')
       .select(`
         *,
-        stations (
-          id,
-          name
+        charging_points (
+          point_id,
+          point_name,
+          connector_type,
+          stations (
+            station_id,
+            name
+          )
         )
       `)
-      .eq('station_id', stationId)
-      .order('start_time', { ascending: true });
+      .eq('charging_points.station_id', stationId)
+      .order('created_at', { ascending: false });
 
     if (status) {
       query = query.eq('status', status);
-    }
-
-    if (date) {
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      query = query
-        .gte('start_time', startOfDay.toISOString())
-        .lte('start_time', endOfDay.toISOString());
     }
 
     const { data: reservations, error } = await query;
@@ -514,6 +357,131 @@ router.get('/station/:stationId', async (req, res) => {
       success: false,
       error: 'Failed to fetch station reservations',
       message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/reservations/:id/validate
+ * Validate a reservation before starting session (NEW)
+ */
+router.post('/:id/validate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing userId in request body'
+      });
+    }
+
+    const result = await reservationService.validateReservation(parseInt(id), parseInt(userId));
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error validating reservation:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/reservations/available-points
+ * Get all available charging points (status = Available) (NEW)
+ */
+router.get('/available-points', async (req, res) => {
+  try {
+    const { stationId } = req.query;
+
+    let query = supabase
+      .from('charging_points')
+      .select(`
+        *,
+        stations (
+          station_id,
+          name,
+          address,
+          price_per_kwh
+        )
+      `)
+      .eq('status', 'Available');
+
+    if (stationId) {
+      query = query.eq('station_id', parseInt(stationId));
+    }
+
+    const { data, error } = await query.order('point_name');
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      data: data || []
+    });
+  } catch (error) {
+    console.error('Error fetching available points:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/reservations/point/:pointId/status
+ * Get real-time status of a specific charging point (NEW)
+ */
+router.get('/point/:pointId/status', async (req, res) => {
+  try {
+    const { pointId } = req.params;
+
+    const { data, error } = await supabase
+      .from('charging_points')
+      .select(`
+        point_id,
+        point_name,
+        status,
+        connector_type,
+        power_kw,
+        stations (
+          station_id,
+          name,
+          price_per_kwh
+        )
+      `)
+      .eq('point_id', parseInt(pointId))
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    // Check if there's an active reservation
+    const { data: activeReservation } = await supabase
+      .from('reservations')
+      .select('reservation_id, user_id, expire_time')
+      .eq('point_id', parseInt(pointId))
+      .in('status', ['Confirmed', 'Active'])
+      .maybeSingle();
+
+    res.json({
+      success: true,
+      data: {
+        ...data,
+        active_reservation: activeReservation || null
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching point status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

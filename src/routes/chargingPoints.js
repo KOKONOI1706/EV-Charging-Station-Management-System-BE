@@ -1,6 +1,5 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
-import { authenticateToken, requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -17,6 +16,11 @@ router.get('/', async (req, res) => {
           id,
           name,
           address
+        ),
+        connector_types (
+          connector_type_id,
+          code,
+          name
         )
       `)
       .order('point_id', { ascending: true });
@@ -66,6 +70,11 @@ router.get('/:id', async (req, res) => {
           city,
           lat,
           lng
+        ),
+        connector_types (
+          connector_type_id,
+          code,
+          name
         )
       `)
       .eq('point_id', id)
@@ -95,8 +104,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PUT /api/charging-points/:id/status - Update charging point status (admin only)
-router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
+// PUT /api/charging-points/:id/status - Update charging point status
+router.put('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -151,17 +160,11 @@ router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/charging-points/:id/reserve - Reserve a charging point (authenticated users)
-router.post('/:id/reserve', authenticateToken, requireAuth, async (req, res) => {
+// POST /api/charging-points/:id/reserve - Reserve a charging point
+router.post('/:id/reserve', async (req, res) => {
   try {
     const { id } = req.params;
-    // use authenticated user id rather than trusting client-provided user_id
-    const { reservation_id } = req.body;
-    const user_id = req.user?.id || req.user?.user_id;
-
-    if (!user_id) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
+    const { user_id, reservation_id } = req.body;
 
     // Check if charging point exists and is available
     const { data: chargingPoint, error: fetchError } = await supabase
@@ -215,8 +218,8 @@ router.post('/:id/reserve', authenticateToken, requireAuth, async (req, res) => 
   }
 });
 
-// POST /api/charging-points/:id/release - Release a reserved charging point (authenticated users)
-router.post('/:id/release', authenticateToken, requireAuth, async (req, res) => {
+// POST /api/charging-points/:id/release - Release a reserved charging point
+router.post('/:id/release', async (req, res) => {
   try {
     const { id } = req.params;
 
