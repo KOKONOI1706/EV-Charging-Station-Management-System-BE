@@ -1,8 +1,13 @@
 import express from 'express';
 import reservationService from '../services/reservationService.js';
 import supabase from '../config/supabase.js';
+import { authenticateToken, requireUser } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Require authenticated customer (user) for reservation actions
+router.use(authenticateToken);
+router.use(requireUser);
 
 /**
  * POST /api/reservations
@@ -10,12 +15,15 @@ const router = express.Router();
  */
 router.post('/', async (req, res) => {
   try {
-    const { userId, pointId, durationMinutes } = req.body;
+    const { pointId, durationMinutes } = req.body;
+
+    // Use authenticated user's id
+    const userId = req.user.id;
 
     if (!userId || !pointId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: userId, pointId'
+        error: 'Missing required fields: pointId'
       });
     }
 
@@ -45,7 +53,9 @@ router.post('/', async (req, res) => {
  */
 router.get('/active', async (req, res) => {
   try {
-    const { userId } = req.query;
+    // For normal users, force query to their own id
+    let { userId } = req.query;
+    if (req.user.role === 'user') userId = req.user.id;
 
     if (!userId) {
       return res.status(400).json({
@@ -73,8 +83,11 @@ router.get('/active', async (req, res) => {
 // GET /api/reservations/user/:userId - Get user's reservations (UPDATED)
 router.get('/user/:userId', async (req, res) => {
   try {
-    const { userId } = req.params;
-    const { status, limit = 50, offset = 0 } = req.query;
+  let { userId } = req.params;
+  const { status, limit = 50, offset = 0 } = req.query;
+
+  // If requester is a normal user, ensure they only access their own reservations
+  if (req.user.role === 'user') userId = req.user.id;
 
     let query = supabase
       .from('reservations')
@@ -288,14 +301,8 @@ router.put('/:id/status', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing userId in request body'
-      });
-    }
+    // Use authenticated user id
+    const userId = req.user.id;
 
     const result = await reservationService.cancelReservation(parseInt(id), parseInt(userId));
 
@@ -368,14 +375,7 @@ router.get('/station/:stationId', async (req, res) => {
 router.post('/:id/validate', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing userId in request body'
-      });
-    }
+    const userId = req.user.id;
 
     const result = await reservationService.validateReservation(parseInt(id), parseInt(userId));
 

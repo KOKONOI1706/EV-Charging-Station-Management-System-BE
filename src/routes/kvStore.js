@@ -1,7 +1,12 @@
 import express from 'express';
 import * as kv from '../supabase/kvStore.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Only admins may access the KV store
+router.use(authenticateToken);
+router.use(requireAdmin);
 
 // Get a value by key
 router.get('/:key', async (req, res, next) => {

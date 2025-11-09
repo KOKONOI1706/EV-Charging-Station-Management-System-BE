@@ -1,12 +1,22 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import { authenticateToken, requireUser } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// GET /api/bookings - Get all bookings for a user
+// All booking actions require an authenticated customer (user)
+router.use(authenticateToken);
+router.use(requireUser);
+
+// GET /api/bookings - Get bookings. Regular users only see their own bookings; admins/staff may query others via userId query
 router.get('/', async (req, res) => {
   try {
-    const { userId, status, limit = 50, offset = 0 } = req.query;
+    let { userId, status, limit = 50, offset = 0 } = req.query;
+
+    // If requester is a normal user, force userId to their own id to prevent accessing others' bookings
+    if (req.user && req.user.role === 'user') {
+      userId = req.user.id;
+    }
 
     let query = supabase
       .from('bookings')
@@ -69,13 +79,15 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const {
-      user_id,
       point_id,
       start_time,
       expire_time,
       promo_id,
       price_estimate
     } = req.body;
+
+    // Use authenticated user's id — don't trust client-supplied user_id
+    const user_id = req.user.id;
 
     // Validate required fields
     if (!user_id || !point_id || !start_time || !expire_time) {
@@ -242,6 +254,25 @@ router.put('/:id/status', async (req, res) => {
       updateData.canceled_at = new Date().toISOString();
     }
 
+    // Ensure only owner or admin can update status
+    const { data: existingBooking, error: fetchExisting } = await supabase
+      .from('bookings')
+      .select('booking_id, user_id, point_id')
+      .eq('booking_id', id)
+      .single();
+
+    if (fetchExisting || !existingBooking) {
+      // if fetchExisting is an error object, continue to let the later block handle
+    }
+
+    if (!existingBooking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    if (req.user.role !== 'admin' && existingBooking.user_id !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Not allowed to modify this booking' });
+    }
+
     const { data: booking, error: updateError } = await supabase
       .from('bookings')
       .update(updateData)
@@ -311,7 +342,7 @@ router.delete('/:id', async (req, res) => {
     // Get booking details before deletion
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('point_id, status')
+      .select('booking_id, point_id, status, user_id')
       .eq('booking_id', id)
       .single();
 
@@ -323,6 +354,11 @@ router.delete('/:id', async (req, res) => {
         });
       }
       throw fetchError;
+    }
+
+    // Only owner or admin can cancel
+    if (req.user.role !== 'admin' && booking.user_id !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Not allowed to cancel this booking' });
     }
 
     // Check if booking can be cancelled

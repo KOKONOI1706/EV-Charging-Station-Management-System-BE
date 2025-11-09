@@ -1,5 +1,6 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import { authenticateToken, requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -104,8 +105,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PUT /api/charging-points/:id/status - Update charging point status
-router.put('/:id/status', async (req, res) => {
+// PUT /api/charging-points/:id/status - Update charging point status (admin only)
+router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -160,8 +161,8 @@ router.put('/:id/status', async (req, res) => {
   }
 });
 
-// POST /api/charging-points/:id/reserve - Reserve a charging point
-router.post('/:id/reserve', async (req, res) => {
+// POST /api/charging-points/:id/reserve - Reserve a charging point (authenticated users)
+router.post('/:id/reserve', authenticateToken, requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { user_id, reservation_id } = req.body;
@@ -218,8 +219,8 @@ router.post('/:id/reserve', async (req, res) => {
   }
 });
 
-// POST /api/charging-points/:id/release - Release a reserved charging point
-router.post('/:id/release', async (req, res) => {
+// POST /api/charging-points/:id/release - Release a reserved charging point (authenticated users)
+router.post('/:id/release', authenticateToken, requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
