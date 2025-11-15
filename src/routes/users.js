@@ -1,5 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { UserModel } from '../models/User.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { createCode, verifyCode, isVerified, clearVerification } from '../services/verificationStore.js';
@@ -236,11 +237,25 @@ router.post('/login', async (req, res) => {
       isActive: user.is_active
     };
     
+    // Require JWT secret to generate real tokens
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET not configured — refusing to issue demo tokens in production mode');
+      return res.status(500).json({ success: false, error: 'Server misconfiguration: JWT_SECRET is not set. Contact administrator.' });
+    }
+
+    const payload = {
+      userId: user.user_id,
+      email: user.email,
+      role: userResponse.role
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
+
     res.json({
       success: true,
       data: {
         user: userResponse,
-        token: `demo_token_${user.user_id}` // In real app, generate JWT
+        token
       },
       message: 'Login successful'
     });
@@ -396,11 +411,25 @@ router.post('/register', async (req, res) => {
         console.error('Failed to send welcome email:', err);
       });
       
+      // Require JWT secret to generate real tokens
+      if (!process.env.JWT_SECRET) {
+        console.error('JWT_SECRET not configured — refusing to issue demo tokens in production mode');
+        return res.status(500).json({ success: false, error: 'Server misconfiguration: JWT_SECRET is not set. Contact administrator.' });
+      }
+
+      const payload = {
+        userId: newUser.user_id,
+        email: newUser.email,
+        role: userResponse.role
+      };
+
+      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
+
       res.status(201).json({
         success: true,
         data: {
           user: userResponse,
-          token: `demo_token_${newUser.user_id}` // TODO: Replace with real JWT
+          token
         },
         message: 'Registration successful'
       });
@@ -419,14 +448,10 @@ router.post('/register', async (req, res) => {
         isActive: true
       };
       
-      res.status(201).json({
-        success: true,
-        data: {
-          user: mockUser,
-          token: `demo_token_${mockUser.id}`
-        },
-        message: 'Registration successful (database unavailable - using temporary account)'
-      });
+      // Fallback mock user response uses demo token (no JWT secret available or DB failure)
+      // When DB is unavailable we still refuse to fall back to demo tokens
+      console.error('Database error during registration and JWT_SECRET not usable for demo flow');
+      return res.status(500).json({ success: false, error: 'Registration failed due to database error' });
     }
 
   } catch (error) {
