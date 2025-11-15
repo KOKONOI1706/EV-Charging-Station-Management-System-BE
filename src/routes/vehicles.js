@@ -1,12 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticateToken, requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
-
-// Require authenticated user for vehicle operations
-router.use(authenticateToken);
-router.use(requireAuth);
 
 // GET /api/vehicles/meta/connector-types - Get all connector types
 router.get('/meta/connector-types', async (req, res) => {

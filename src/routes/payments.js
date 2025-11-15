@@ -1,14 +1,13 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
 import paymentController from '../controllers/paymentController.js';
-import { authenticateToken, requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // ============ MoMo Payment Routes ============
 
-// POST /api/payments/momo/create - Create MoMo payment session (authenticated users)
-router.post('/momo/create', authenticateToken, requireAuth, (req, res, next) => {
+// POST /api/payments/momo/create - Create MoMo payment session
+router.post('/momo/create', (req, res, next) => {
   console.log('🎯 Received MoMo payment request:', {
     session_id: req.body.session_id,
     amount: req.body.amount
@@ -25,13 +24,13 @@ router.get('/momo/status/:orderId', paymentController.checkPaymentStatus);
 // POST /api/payments/momo/manual-complete - Manual complete payment (workaround for localhost)
 router.post('/momo/manual-complete', paymentController.manualCompletePayment);
 
-// GET /api/payments/user/:userId - Get user's payment history (authenticated)
-router.get('/user/:userId', authenticateToken, requireAuth, paymentController.getUserPayments);
+// GET /api/payments/user/:userId - Get user's payment history
+router.get('/user/:userId', paymentController.getUserPayments);
 
 // ============ Legacy Payment Routes (Keep for backward compatibility) ============
 
-// POST /api/payments/create-session - Create payment session (authenticated)
-router.post('/create-session', authenticateToken, requireAuth, async (req, res) => {
+// POST /api/payments/create-session - Create payment session
+router.post('/create-session', async (req, res) => {
   try {
     const {
       reservation_id,
@@ -142,8 +141,8 @@ router.post('/create-session', authenticateToken, requireAuth, async (req, res) 
   }
 });
 
-// POST /api/payments/verify - Verify payment status (authenticated)
-router.post('/verify', authenticateToken, requireAuth, async (req, res) => {
+// POST /api/payments/verify - Verify payment status
+router.post('/verify', async (req, res) => {
   try {
     const { payment_id, session_id } = req.body;
 
@@ -311,8 +310,8 @@ router.get('/reservation/:reservationId', async (req, res) => {
   }
 });
 
-// POST /api/payments/refund - Process refund (admin only)
-router.post('/refund', authenticateToken, requireAdmin, async (req, res) => {
+// POST /api/payments/refund - Process refund
+router.post('/refund', async (req, res) => {
   try {
     const { payment_id, amount, reason = 'Customer request' } = req.body;
 

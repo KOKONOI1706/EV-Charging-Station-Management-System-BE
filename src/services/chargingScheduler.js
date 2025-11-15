@@ -29,18 +29,17 @@ class ChargingScheduler {
 
     console.log('🚀 Starting charging scheduler...');
 
-    // ⚠️ TODO: Update reservationService to use 'bookings' table instead of 'reservations'
-    // Reservation expiry disabled temporarily
-    // this.intervals.reservationExpiry = setInterval(async () => {
-    //   try {
-    //     const result = await reservationService.expireOldReservations();
-    //     if (result.expired > 0) {
-    //       console.log(`⏱️  Expired ${result.expired} old reservations`);
-    //     }
-    //   } catch (error) {
-    //     console.error('Error in reservation expiry scheduler:', error);
-    //   }
-    // }, 30 * 1000);
+    // Reservation expiry - every 30 seconds
+    this.intervals.reservationExpiry = setInterval(async () => {
+      try {
+        const result = await reservationService.expireOldReservations();
+        if (result.expired > 0) {
+          console.log(`⏱️  Expired ${result.expired} old reservations`);
+        }
+      } catch (error) {
+        console.error('Error in reservation expiry scheduler:', error);
+      }
+    }, 30 * 1000); // 30 seconds
 
     // Detect almost done sessions every 1 minute
     this.intervals.almostDoneDetection = setInterval(async () => {
@@ -55,9 +54,9 @@ class ChargingScheduler {
     }, 60 * 1000); // 1 minute
 
     this.isRunning = true;
-    console.log('✅ Charging scheduler started (partial)');
+    console.log('✅ Charging scheduler started');
+    console.log('   - Reservation expiry: every 30s');
     console.log('   - AlmostDone detection: every 1min');
-    console.log('   ⚠️  Booking expiry disabled - needs update for bookings table');
 
     // Run immediately on start
     this.runImmediately();
@@ -95,9 +94,9 @@ class ChargingScheduler {
     console.log('🔄 Running scheduler tasks immediately...');
     
     try {
-      // Expire old reservations - DISABLED (needs bookings table update)
-      // const expiryResult = await reservationService.expireOldReservations();
-      // console.log(`   ✓ Expired ${expiryResult.expired} reservations`);
+      // Expire old reservations
+      const expiryResult = await reservationService.expireOldReservations();
+      console.log(`   ✓ Expired ${expiryResult.expired} reservations`);
 
       // Detect almost done sessions
       const almostDoneResult = await sessionManagementService.detectAlmostDoneSessions();

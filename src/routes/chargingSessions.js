@@ -1,13 +1,8 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
 import sessionManagementService from '../services/sessionManagementService.js';
-import { authenticateToken, requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
-
-// Require authenticated users for charging session operations
-router.use(authenticateToken);
-router.use(requireAuth);
 
 /**
  * ========================================

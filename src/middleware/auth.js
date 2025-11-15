@@ -51,18 +51,15 @@ export const authenticateToken = async (req, res, next) => {
 
     if (!user) return res.status(403).json({ success: false, message: 'Invalid token or user not found' });
 
-    // Normalize user object: ensure id and role fields exist and normalize role to lowercase string
-    const rawRole = user.role || mapRoleIdToName(user.role_id) || user.role_id || null;
-    const normalizedRole = rawRole ? String(rawRole).toLowerCase() : null;
-
+    // Normalize user object: ensure id and role fields exist
     req.user = {
       // prefer id or user_id depending on schema
       id: user.id || user.user_id || user.userId || null,
       user_id: user.user_id || user.id || null,
       email: user.email,
       full_name: user.full_name || user.name || null,
-      // normalized role
-      role: normalizedRole,
+      // role may be a string or numeric role_id in DB
+      role: user.role || mapRoleIdToName(user.role_id) || user.role_id || null,
       raw: user
     };
 
@@ -75,11 +72,9 @@ export const authenticateToken = async (req, res, next) => {
 export const requireRole = (allowedRoles) => (req, res, next) => {
   if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
 
-  const currentRole = (req.user.role || '').toString().toLowerCase();
-  // allow numeric role ids in allowedRoles too (e.g., ['admin',2]) and normalize allowed list
-  const allowed = allowedRoles
-    .map(r => (typeof r === 'number' ? mapRoleIdToName(r) : r))
-    .map(a => (a ? String(a).toLowerCase() : a));
+  const currentRole = req.user.role;
+  // allow numeric role ids in allowedRoles too (e.g., ['admin',2])
+  const allowed = allowedRoles.map(r => (typeof r === 'number' ? mapRoleIdToName(r) : r));
 
   if (!currentRole || !allowed.includes(currentRole)) {
     return res.status(403).json({
@@ -96,4 +91,3 @@ export const requireRole = (allowedRoles) => (req, res, next) => {
 export const requireAdmin = requireRole(['admin']);
 export const requireAdminOrStaff = requireRole(['admin', 'staff']);
 export const requireAuth = requireRole(['admin', 'staff', 'user']);
-export const requireUser = requireRole(['user']);
