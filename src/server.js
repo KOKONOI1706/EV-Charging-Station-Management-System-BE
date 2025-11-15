@@ -16,6 +16,7 @@ import analyticsRouter from './routes/analytics.js';
 import packageRoutes from './routes/packageRoutes.js';
 import vehiclesRouter from './routes/vehicles.js';
 import staffStatsRouter from './routes/staffStats.js';
+import staffRouter from './routes/staff.js';
 import userStationsRouter from './routes/userStations.js';
 import adminStatsRouter from './routes/adminStats.js';
 
@@ -81,6 +82,7 @@ app.use('/api/vehicles', vehiclesRouter);
 app.use('/api/staff-stats', staffStatsRouter);
 app.use('/api/user-stations', userStationsRouter);
 app.use('/api/admin', adminStatsRouter);
+app.use('/api/staff', staffRouter);
 
 // ✅ Basic route with API information
 app.get('/', (req, res) => {
