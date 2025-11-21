@@ -1,10 +1,13 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
+import { requireAuth, optionalAuth } from '../middleware/authMiddleware.js';
+import { requireAdmin, requireStaff } from '../middleware/requireRole.js';
 
 const router = express.Router();
 
 // GET /api/stations - Get all stations with optional location filtering
-router.get('/', async (req, res) => {
+// Public endpoint - no authentication required
+router.get('/', optionalAuth, async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
     
@@ -66,7 +69,8 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/stations/:id - Get station by ID
-router.get('/:id', async (req, res) => {
+// Public endpoint - no authentication required
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -101,7 +105,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/stations - Create new station (admin only)
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
   try {
     const stationData = {
       ...req.body,
@@ -135,7 +139,8 @@ router.post('/', async (req, res) => {
 });
 
 // POST /api/stations/search - Search stations with filters
-router.post('/search', async (req, res) => {
+// Public endpoint - no authentication required
+router.post('/search', optionalAuth, async (req, res) => {
   try {
     const { 
       query, 
@@ -224,7 +229,7 @@ router.post('/search', async (req, res) => {
 });
 
 // PUT /api/stations/:id - Update station (admin only)
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     console.log('🔵 PUT /api/stations/:id - Updating station:', id);
@@ -271,8 +276,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// PUT /api/stations/:id/availability - Update station availability
-router.put('/:id/availability', async (req, res) => {
+// PUT /api/stations/:id/availability - Update station availability (admin only)
+router.put('/:id/availability', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { change } = req.body; // +1 or -1
@@ -329,7 +334,7 @@ router.put('/:id/availability', async (req, res) => {
 });
 
 // DELETE /api/stations/:id - Delete station (admin only)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

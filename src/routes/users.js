@@ -5,11 +5,13 @@ import { UserModel } from '../models/User.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { createCode, verifyCode, isVerified, clearVerification } from '../services/verificationStore.js';
 import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../services/emailService.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
+import { requireAdmin, requireStaff, requireOwnership } from '../middleware/requireRole.js';
 
 const router = express.Router();
 
-// GET /api/users - Get all users with pagination and stats (admin only)
-router.get('/', async (req, res) => {
+// GET /api/users - Get all users with pagination and stats (staff or admin only)
+router.get('/', requireAuth, requireStaff, async (req, res) => {
   try {
     // Get pagination parameters
     const page = parseInt(req.query.page) || 1;
@@ -130,9 +132,22 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/users/:id - Get user by ID
-router.get('/:id', (req, res) => {
+// GET /api/users/:id - Get user by ID (own profile or staff/admin)
+router.get('/:id', requireAuth, async (req, res) => {
   try {
+    const requestedUserId = req.params.id;
+    const currentUserId = req.user.id;
+    const currentUserRole = req.user.role;
+
+    // Check if user is requesting their own profile OR is staff/admin
+    if (requestedUserId.toString() !== currentUserId.toString() && currentUserRole === 0) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'You can only view your own profile'
+      });
+    }
+
     const user = mockUsers.find(u => u.id === req.params.id);
     if (!user) {
       return res.status(404).json({
@@ -158,6 +173,7 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/users/login - Login user
+// Public endpoint - no authentication required
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -269,6 +285,7 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /api/users/send-code - send verification code to given email
+// Public endpoint - no authentication required
 router.post('/send-code', async (req, res) => {
   try {
     const { email } = req.body;
@@ -289,6 +306,7 @@ router.post('/send-code', async (req, res) => {
 });
 
 // POST /api/users/verify-code - verify code for email
+// Public endpoint - no authentication required
 router.post('/verify-code', (req, res) => {
   try {
     const { email, code } = req.body;
@@ -305,6 +323,7 @@ router.post('/verify-code', (req, res) => {
 });
 
 // POST /api/users/register - Register new user
+// Public endpoint - no authentication required
 router.post('/register', async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
@@ -465,6 +484,7 @@ router.post('/register', async (req, res) => {
 });
 
 // POST /api/users/forgot-password - Send password reset code
+// Public endpoint - no authentication required
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -509,6 +529,7 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 // POST /api/users/reset-password - Reset password with code
+// Public endpoint - no authentication required
 router.post('/reset-password', async (req, res) => {
   try {
     const { email, code, newPassword } = req.body;
@@ -571,9 +592,22 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
-// PUT /api/users/:id - Update user profile
-router.put('/:id', async (req, res) => {
+// PUT /api/users/:id - Update user profile (own profile or admin)
+router.put('/:id', requireAuth, async (req, res) => {
   try {
+    const requestedUserId = req.params.id;
+    const currentUserId = req.user.id;
+    const currentUserRole = req.user.role;
+
+    // Check if user is updating their own profile OR is admin
+    if (requestedUserId.toString() !== currentUserId.toString() && currentUserRole !== 2) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'You can only update your own profile unless you are an admin'
+      });
+    }
+
     const userId = req.params.id;
     const { name, email, phone, vehicleInfo } = req.body;
 
@@ -668,9 +702,21 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// POST /api/users/:id/change-password - Change user password
-router.post('/:id/change-password', async (req, res) => {
+// POST /api/users/:id/change-password - Change user password (own account only)
+router.post('/:id/change-password', requireAuth, async (req, res) => {
   try {
+    const requestedUserId = req.params.id;
+    const currentUserId = req.user.id;
+
+    // User can only change their own password
+    if (requestedUserId.toString() !== currentUserId.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'You can only change your own password'
+      });
+    }
+
     const userId = req.params.id;
     const { currentPassword, newPassword } = req.body;
 
