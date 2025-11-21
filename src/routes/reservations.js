@@ -288,12 +288,12 @@ router.put('/:id/status', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
+    const { userId } = req.query; // Changed from req.body to req.query
 
     if (!userId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing userId in request body'
+        error: 'Missing userId in query parameter'
       });
     }
 

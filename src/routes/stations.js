@@ -227,6 +227,9 @@ router.post('/search', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    console.log('🔵 PUT /api/stations/:id - Updating station:', id);
+    console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
+    
     const updateData = {
       ...req.body,
       updated_at: new Date().toISOString()
@@ -240,6 +243,7 @@ router.put('/:id', async (req, res) => {
       .single();
 
     if (error) {
+      console.error('❌ Supabase update error:', error);
       if (error.code === 'PGRST116') {
         return res.status(404).json({
           success: false,
@@ -248,6 +252,9 @@ router.put('/:id', async (req, res) => {
       }
       throw error;
     }
+    
+    console.log('✅ Station updated successfully:', updatedStation.name);
+    console.log('📤 Returning data with price_per_kwh:', updatedStation.price_per_kwh);
 
     res.json({
       success: true,
