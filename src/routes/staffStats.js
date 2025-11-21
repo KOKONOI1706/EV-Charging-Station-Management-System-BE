@@ -1,13 +1,15 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
+import { requireStaff } from '../middleware/requireRole.js';
 
 const router = express.Router();
 
 /**
  * GET /api/staff-stats/metrics
- * Get staff dashboard metrics
+ * Get staff dashboard metrics (Staff or Admin only)
  */
-router.get('/metrics', async (req, res) => {
+router.get('/metrics', requireAuth, requireStaff, async (req, res) => {
   try {
     const now = new Date();
     const sevenDaysAgo = new Date(now);
