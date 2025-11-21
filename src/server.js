@@ -22,9 +22,6 @@ import adminStatsRouter from './routes/adminStats.js';
 // Import scheduler
 import chargingScheduler from './services/chargingScheduler.js';
 
-// Import scheduler
-import chargingScheduler from './services/chargingScheduler.js';
-
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
