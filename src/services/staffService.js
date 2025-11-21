@@ -3,6 +3,11 @@ import { supabaseAdmin } from '../config/supabase.js';
 const PARKING_FEE_PER_MINUTE = parseFloat(process.env.PARKING_FEE_PER_MINUTE || '0.5');
 const PARKING_GRACE_MINUTES = parseInt(process.env.PARKING_GRACE_MINUTES || '10', 10);
 
+/**
+ * Bắt đầu phiên sạc cho một user
+ * Input: userId, vehicleId, stationId, pointId (optional), meter_start (optional)
+ * Output: thông tin phiên sạc mới, thời gian bắt đầu
+ */
 async function startSession({ userId, vehicleId, stationId, pointId = null, meter_start = null }) {
   if (!userId || !vehicleId || !stationId) {
     const err = new Error('Missing required fields: userId, vehicleId, stationId');
@@ -10,27 +15,148 @@ async function startSession({ userId, vehicleId, stationId, pointId = null, mete
     throw err;
   }
 
+  // Nếu không có pointId, tìm một charging point available từ station
+  let selectedPointId = pointId;
+  
+  if (!selectedPointId) {
+    // Tìm charging point available từ station
+    const { data: availablePoints, error: pointsError } = await supabaseAdmin
+      .from('charging_points')
+      .select('point_id, name, status')
+      .eq('station_id', stationId)
+      .in('status', ['Available', 'Reserved'])
+      .limit(1)
+      .single();
+
+    if (pointsError || !availablePoints) {
+      const err = new Error(`No available charging point found at station ${stationId}`);
+      err.status = 404;
+      throw err;
+    }
+
+    selectedPointId = availablePoints.point_id;
+  } else {
+    // Kiểm tra pointId có thuộc stationId không
+    const { data: point, error: pointError } = await supabaseAdmin
+      .from('charging_points')
+      .select('point_id, station_id, status')
+      .eq('point_id', selectedPointId)
+      .single();
+
+    if (pointError || !point) {
+      const err = new Error('Charging point not found');
+      err.status = 404;
+      throw err;
+    }
+
+    if (point.station_id !== parseInt(stationId)) {
+      const err = new Error('Charging point does not belong to the specified station');
+      err.status = 400;
+      throw err;
+    }
+
+    if (!['Available', 'Reserved'].includes(point.status)) {
+      const err = new Error(`Charging point is not available (status: ${point.status})`);
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  // Kiểm tra user có session đang active không
+  const { data: activeSession } = await supabaseAdmin
+    .from('charging_sessions')
+    .select('session_id')
+    .eq('user_id', userId)
+    .eq('status', 'Active')
+    .maybeSingle();
+
+  if (activeSession) {
+    const err = new Error('User already has an active charging session');
+    err.status = 400;
+    throw err;
+  }
+
+  // Kiểm tra point có đang được sử dụng không
+  const { data: pointInUse } = await supabaseAdmin
+    .from('charging_sessions')
+    .select('session_id')
+    .eq('point_id', selectedPointId)
+    .eq('status', 'Active')
+    .maybeSingle();
+
+  if (pointInUse) {
+    const err = new Error('Charging point is currently in use');
+    err.status = 400;
+    throw err;
+  }
+
+  // Tạo session mới với trạng thái "đang sạc" (Active)
+  const startTime = new Date();
   const sessionData = {
     user_id: userId,
     vehicle_id: vehicleId,
-    point_id: pointId || null,
-    station_id: stationId,
-    start_time: new Date().toISOString(),
-    meter_start: meter_start || null,
+    point_id: selectedPointId,
+    start_time: startTime.toISOString(),
+    meter_start: meter_start || 0,
     status: 'Active',
-    created_at: new Date().toISOString()
+    created_at: startTime.toISOString()
   };
 
   const { data: session, error } = await supabaseAdmin
     .from('charging_sessions')
     .insert([sessionData])
-    .select(`*, charging_points (*), stations (*)`)
+    .select(`
+      *,
+      charging_points (
+        point_id,
+        name,
+        power_kw,
+        station_id,
+        stations (
+          station_id,
+          name,
+          address,
+          price_per_kwh
+        )
+      ),
+      vehicles (
+        vehicle_id,
+        plate_number,
+        battery_capacity_kwh
+      ),
+      users (
+        user_id,
+        name,
+        email
+      )
+    `)
     .single();
 
-  if (error) throw error;
-  return session;
+  if (error) {
+    console.error('Error creating session:', error);
+    throw error;
+  }
+
+  // Cập nhật trạng thái charging point thành InUse
+  await supabaseAdmin
+    .from('charging_points')
+    .update({ 
+      status: 'InUse',
+      updated_at: startTime.toISOString()
+    })
+    .eq('point_id', selectedPointId);
+
+  return {
+    ...session,
+    start_time: startTime.toISOString()
+  };
 }
 
+/**
+ * Kiểm tra hóa đơn chưa thanh toán của user
+ * Input: userId
+ * Output: danh sách hóa đơn chưa thanh toán hoặc trạng thái "còn nợ" / "đã thanh toán"
+ */
 async function getUnpaidInvoicesForUser(userId) {
   if (!userId) {
     const err = new Error('userId is required');
@@ -38,26 +164,51 @@ async function getUnpaidInvoicesForUser(userId) {
     throw err;
   }
 
-  const { data: reservations } = await supabaseAdmin
-    .from('reservations')
-    .select('id')
-    .eq('user_id', userId);
+  // Lấy danh sách hóa đơn chưa thanh toán từ bảng invoices
+  // Status 'Issued' hoặc các status khác 'Paid' được coi là chưa thanh toán
+  const { data: unpaidInvoices, error } = await supabaseAdmin
+    .from('invoices')
+    .select(`
+      *,
+      charging_sessions (
+        session_id,
+        start_time,
+        end_time,
+        energy_consumed_kwh
+      ),
+      payments (
+        payment_id,
+        amount,
+        status
+      )
+    `)
+    .eq('user_id', userId)
+    .neq('status', 'Paid')
+    .order('issued_at', { ascending: false });
 
-  const reservationIds = (reservations || []).map(r => r.id).filter(Boolean);
+  if (error) {
+    console.error('Error fetching unpaid invoices:', error);
+    throw error;
+  }
 
-  const { data: unpaidPayments, error } = await supabaseAdmin
-    .from('payments')
-    .select('*')
-    .in('reservation_id', reservationIds.length ? reservationIds : [-1])
-    .neq('status', 'completed')
-    .order('created_at', { ascending: false });
-
-  if (error) throw error;
-
-  const owes = (unpaidPayments && unpaidPayments.length > 0);
-  return { unpaidPayments: unpaidPayments || [], owes };
+  const owes = (unpaidInvoices && unpaidInvoices.length > 0);
+  
+  return { 
+    unpaidInvoices: unpaidInvoices || [], 
+    owes,
+    message: owes ? 'User has outstanding invoices' : 'No outstanding invoices'
+  };
 }
 
+/**
+ * Dừng phiên sạc cho một user
+ * Input: sessionId, meter_end (optional)
+ * Xử lý: 
+ * - Kiểm tra user có hóa đơn chưa thanh toán không (chỉ được dừng nếu không còn nợ)
+ * - Cập nhật trạng thái phiên sạc thành "đã dừng" (Completed)
+ * - Kiểm tra thời gian sạc để tính phí đậu xe nếu vượt quá 10 phút
+ * Output: thông tin phí sạc, phí đậu (nếu có)
+ */
 async function stopSession(sessionId, meter_end) {
   if (!sessionId) {
     const err = new Error('sessionId is required');
@@ -65,9 +216,34 @@ async function stopSession(sessionId, meter_end) {
     throw err;
   }
 
+  // Lấy thông tin session
   const { data: session, error: sessionErr } = await supabaseAdmin
     .from('charging_sessions')
-    .select(`*, reservations (*), charging_points (*), stations (*)`)
+    .select(`
+      *,
+      charging_points (
+        point_id,
+        name,
+        power_kw,
+        station_id,
+        stations (
+          station_id,
+          name,
+          address,
+          price_per_kwh
+        )
+      ),
+      vehicles (
+        vehicle_id,
+        plate_number,
+        battery_capacity_kwh
+      ),
+      users (
+        user_id,
+        name,
+        email
+      )
+    `)
     .eq('session_id', sessionId)
     .single();
 
@@ -78,83 +254,153 @@ async function stopSession(sessionId, meter_end) {
   }
 
   if (session.status !== 'Active') {
-    const err = new Error('Session is not active');
+    const err = new Error(`Session is not active (current status: ${session.status})`);
     err.status = 400;
     throw err;
   }
 
   const userId = session.user_id;
 
-  // Find reservations for user
-  const { data: reservations } = await supabaseAdmin
-    .from('reservations')
-    .select('id')
-    .eq('user_id', userId);
+  // Kiểm tra user có hóa đơn chưa thanh toán không
+  // Staff chỉ được phép dừng phiên sạc nếu user không còn nợ
+  const { data: unpaidInvoices, error: invoiceError } = await supabaseAdmin
+    .from('invoices')
+    .select('invoice_id, total_amount, status, issued_at')
+    .eq('user_id', userId)
+    .neq('status', 'Paid');
 
-  const reservationIds = (reservations || []).map(r => r.id).filter(Boolean);
+  if (invoiceError) {
+    console.error('Error checking unpaid invoices:', invoiceError);
+    throw invoiceError;
+  }
 
-  // Get payments for those reservations where status != completed
-  const { data: unpaidForUser } = await supabaseAdmin
-    .from('payments')
-    .select('*')
-    .in('reservation_id', reservationIds.length ? reservationIds : [-1])
-    .neq('status', 'completed');
-
-  if (unpaidForUser && unpaidForUser.length > 0) {
-    const err = new Error('User has outstanding invoices. Cannot stop session or allow exit.');
+  if (unpaidInvoices && unpaidInvoices.length > 0) {
+    const err = new Error('User has outstanding invoices. Cannot stop session or allow exit. Please pay outstanding invoices first.');
     err.status = 403;
+    err.data = { unpaidInvoices };
     throw err;
   }
 
-  const start = session.start_time ? new Date(session.start_time) : null;
-  const end = new Date();
-  const durationMs = start ? (end - start) : 0;
-  const durationMinutes = Math.max(0, Math.ceil((durationMs / 1000) / 60));
+  // Tính toán thời gian sạc
+  const startTime = session.start_time ? new Date(session.start_time) : new Date();
+  const endTime = new Date();
+  const durationMs = endTime - startTime;
+  const durationMinutes = Math.max(0, Math.ceil(durationMs / (1000 * 60)));
 
+  // Tính phí đậu xe nếu vượt quá 10 phút
   let parkingFee = 0;
   if (durationMinutes > PARKING_GRACE_MINUTES) {
-    parkingFee = (durationMinutes - PARKING_GRACE_MINUTES) * PARKING_FEE_PER_MINUTE;
+    const parkingMinutes = durationMinutes - PARKING_GRACE_MINUTES;
+    parkingFee = parkingMinutes * PARKING_FEE_PER_MINUTE;
   }
 
+  // Tính phí sạc
   let chargingCost = 0;
   let energyConsumed = null;
-  if (meter_end !== undefined && session.meter_start !== null && session.meter_start !== undefined) {
+  
+  if (meter_end !== undefined && meter_end !== null && session.meter_start !== null && session.meter_start !== undefined) {
     energyConsumed = parseFloat(meter_end) - parseFloat(session.meter_start || 0);
-    if (isNaN(energyConsumed) || energyConsumed < 0) energyConsumed = null;
+    if (isNaN(energyConsumed) || energyConsumed < 0) {
+      energyConsumed = null;
+    }
   }
 
+  // Lấy giá điện từ station hoặc charging point
   let pricePerKwh = null;
-  if (session.charging_points && session.charging_points.price_per_kwh) {
+  if (session.charging_points?.stations?.price_per_kwh) {
+    pricePerKwh = parseFloat(session.charging_points.stations.price_per_kwh);
+  } else if (session.charging_points?.price_per_kwh) {
     pricePerKwh = parseFloat(session.charging_points.price_per_kwh);
-  } else if (session.stations && session.stations.price_per_kwh) {
-    pricePerKwh = parseFloat(session.stations.price_per_kwh);
   }
 
-  if (energyConsumed !== null && pricePerKwh) {
+  // Nếu không có giá, dùng giá mặc định (5000 VND/kWh)
+  if (!pricePerKwh || pricePerKwh <= 0) {
+    pricePerKwh = 5000;
+  }
+
+  // Tính phí sạc dựa trên năng lượng tiêu thụ
+  if (energyConsumed !== null && energyConsumed > 0) {
     chargingCost = energyConsumed * pricePerKwh;
   }
 
+  // Tổng phí = phí sạc + phí đậu
+  const totalCost = chargingCost + parkingFee;
+
+  // Cập nhật session với trạng thái "đã dừng" (Completed)
   const updateData = {
     status: 'Completed',
-    end_time: end.toISOString(),
-    updated_at: new Date().toISOString()
+    end_time: endTime.toISOString()
   };
 
-  if (meter_end !== undefined) updateData.meter_end = meter_end;
-  if (energyConsumed !== null) updateData.energy_consumed_kwh = energyConsumed;
-  if (chargingCost) updateData.cost = chargingCost;
-  if (parkingFee) updateData.parking_fee = parkingFee;
+  if (meter_end !== undefined && meter_end !== null) {
+    updateData.meter_end = parseFloat(meter_end);
+  }
+  
+  if (energyConsumed !== null) {
+    updateData.energy_consumed_kwh = parseFloat(energyConsumed.toFixed(4));
+  }
+  
+  // Cập nhật phí đậu xe (idle_fee)
+  if (parkingFee > 0) {
+    updateData.idle_fee = parseFloat(parkingFee.toFixed(2));
+  }
+
+  // Cập nhật tổng chi phí (phí sạc + phí đậu)
+  if (totalCost > 0) {
+    updateData.cost = parseFloat(totalCost.toFixed(2));
+  } else if (chargingCost > 0) {
+    // Nếu chỉ có phí sạc (không có phí đậu)
+    updateData.cost = parseFloat(chargingCost.toFixed(2));
+  }
 
   const { data: updatedSession, error: updateErr } = await supabaseAdmin
     .from('charging_sessions')
     .update(updateData)
     .eq('session_id', sessionId)
-    .select('*')
+    .select(`
+      *,
+      charging_points (
+        point_id,
+        name,
+        power_kw,
+        stations (
+          station_id,
+          name,
+          address,
+          price_per_kwh
+        )
+      ),
+      vehicles (
+        vehicle_id,
+        plate_number
+      )
+    `)
     .single();
 
-  if (updateErr) throw updateErr;
+  if (updateErr) {
+    console.error('Error updating session:', updateErr);
+    throw updateErr;
+  }
 
-  return { updatedSession, chargingCost, parkingFee, durationMinutes };
+  // Cập nhật trạng thái charging point về Available
+  if (session.point_id) {
+    await supabaseAdmin
+      .from('charging_points')
+      .update({ 
+        status: 'Available',
+        updated_at: endTime.toISOString()
+      })
+      .eq('point_id', session.point_id);
+  }
+
+  return { 
+    updatedSession, 
+    chargingCost: parseFloat(chargingCost.toFixed(2)), 
+    parkingFee: parseFloat(parkingFee.toFixed(2)),
+    totalCost: parseFloat(totalCost.toFixed(2)),
+    durationMinutes,
+    energyConsumed: energyConsumed ? parseFloat(energyConsumed.toFixed(4)) : null
+  };
 }
 
 export { startSession, stopSession, getUnpaidInvoicesForUser };
