@@ -20,16 +20,24 @@ async function startSession({ userId, vehicleId, stationId, pointId = null, mete
   
   if (!selectedPointId) {
     // Tìm charging point available từ station
+    const stationIdInt = parseInt(stationId);
     const { data: availablePoints, error: pointsError } = await supabaseAdmin
       .from('charging_points')
       .select('point_id, name, status')
-      .eq('station_id', stationId)
+      .eq('station_id', stationIdInt)
       .in('status', ['Available', 'Reserved'])
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    if (pointsError || !availablePoints) {
-      const err = new Error(`No available charging point found at station ${stationId}`);
+    if (pointsError) {
+      console.error('Error finding available charging point:', pointsError);
+      const err = new Error(`Error finding available charging point: ${pointsError.message}`);
+      err.status = 500;
+      throw err;
+    }
+
+    if (!availablePoints) {
+      const err = new Error(`No available charging point found at station ${stationIdInt}`);
       err.status = 404;
       throw err;
     }
@@ -43,14 +51,25 @@ async function startSession({ userId, vehicleId, stationId, pointId = null, mete
       .eq('point_id', selectedPointId)
       .single();
 
-    if (pointError || !point) {
+    if (pointError) {
+      console.error('Error fetching charging point:', pointError);
+      const err = new Error(`Charging point not found: ${pointError.message}`);
+      err.status = 404;
+      throw err;
+    }
+
+    if (!point) {
       const err = new Error('Charging point not found');
       err.status = 404;
       throw err;
     }
 
-    if (point.station_id !== parseInt(stationId)) {
-      const err = new Error('Charging point does not belong to the specified station');
+    // Đảm bảo so sánh đúng kiểu dữ liệu
+    const pointStationId = parseInt(point.station_id);
+    const requestedStationId = parseInt(stationId);
+    
+    if (pointStationId !== requestedStationId) {
+      const err = new Error(`Charging point does not belong to the specified station. Point belongs to station ${pointStationId}, but requested station ${requestedStationId}`);
       err.status = 400;
       throw err;
     }
@@ -111,13 +130,7 @@ async function startSession({ userId, vehicleId, stationId, pointId = null, mete
         point_id,
         name,
         power_kw,
-        station_id,
-        stations (
-          station_id,
-          name,
-          address,
-          price_per_kwh
-        )
+        station_id
       ),
       vehicles (
         vehicle_id,
@@ -134,7 +147,36 @@ async function startSession({ userId, vehicleId, stationId, pointId = null, mete
 
   if (error) {
     console.error('Error creating session:', error);
-    throw error;
+    console.error('Session data attempted:', sessionData);
+    const err = new Error(`Failed to create session: ${error.message}`);
+    err.status = 500;
+    err.originalError = error;
+    throw err;
+  }
+
+  if (!session) {
+    const err = new Error('Session was not created');
+    err.status = 500;
+    throw err;
+  }
+
+  // Lấy thông tin station riêng vì nested query có thể không hoạt động
+  let stationInfo = null;
+  if (session.charging_points && session.charging_points.station_id) {
+    const { data: station } = await supabaseAdmin
+      .from('stations')
+      .select('station_id, name, address, price_per_kwh')
+      .eq('station_id', session.charging_points.station_id)
+      .single();
+    
+    if (station) {
+      stationInfo = station;
+    }
+  }
+
+  // Thêm thông tin station vào session object
+  if (stationInfo && session.charging_points) {
+    session.charging_points.stations = stationInfo;
   }
 
   // Cập nhật trạng thái charging point thành InUse
@@ -217,6 +259,7 @@ async function stopSession(sessionId, meter_end) {
   }
 
   // Lấy thông tin session
+  const sessionIdInt = parseInt(sessionId);
   const { data: session, error: sessionErr } = await supabaseAdmin
     .from('charging_sessions')
     .select(`
@@ -225,13 +268,7 @@ async function stopSession(sessionId, meter_end) {
         point_id,
         name,
         power_kw,
-        station_id,
-        stations (
-          station_id,
-          name,
-          address,
-          price_per_kwh
-        )
+        station_id
       ),
       vehicles (
         vehicle_id,
@@ -244,13 +281,39 @@ async function stopSession(sessionId, meter_end) {
         email
       )
     `)
-    .eq('session_id', sessionId)
+    .eq('session_id', sessionIdInt)
     .single();
 
-  if (sessionErr || !session) {
-    const err = new Error('Session not found');
+  if (sessionErr) {
+    console.error('Error fetching session:', sessionErr);
+    const err = new Error(`Session not found: ${sessionErr.message}`);
     err.status = 404;
     throw err;
+  }
+
+  if (!session) {
+    const err = new Error(`Session with ID ${sessionIdInt} not found`);
+    err.status = 404;
+    throw err;
+  }
+
+  // Lấy thông tin station riêng
+  let stationInfo = null;
+  if (session.charging_points && session.charging_points.station_id) {
+    const { data: station } = await supabaseAdmin
+      .from('stations')
+      .select('station_id, name, address, price_per_kwh')
+      .eq('station_id', session.charging_points.station_id)
+      .single();
+    
+    if (station) {
+      stationInfo = station;
+    }
+  }
+
+  // Thêm thông tin station vào session object
+  if (stationInfo && session.charging_points) {
+    session.charging_points.stations = stationInfo;
   }
 
   if (session.status !== 'Active') {
@@ -309,8 +372,21 @@ async function stopSession(sessionId, meter_end) {
   let pricePerKwh = null;
   if (session.charging_points?.stations?.price_per_kwh) {
     pricePerKwh = parseFloat(session.charging_points.stations.price_per_kwh);
-  } else if (session.charging_points?.price_per_kwh) {
-    pricePerKwh = parseFloat(session.charging_points.price_per_kwh);
+  } else if (session.charging_points?.price_rate) {
+    pricePerKwh = parseFloat(session.charging_points.price_rate);
+  }
+  
+  // Nếu vẫn chưa có, thử query trực tiếp từ station
+  if (!pricePerKwh && session.charging_points?.station_id) {
+    const { data: station } = await supabaseAdmin
+      .from('stations')
+      .select('price_per_kwh')
+      .eq('station_id', session.charging_points.station_id)
+      .single();
+    
+    if (station && station.price_per_kwh) {
+      pricePerKwh = parseFloat(station.price_per_kwh);
+    }
   }
 
   // Nếu không có giá, dùng giá mặc định (5000 VND/kWh)
@@ -356,19 +432,14 @@ async function stopSession(sessionId, meter_end) {
   const { data: updatedSession, error: updateErr } = await supabaseAdmin
     .from('charging_sessions')
     .update(updateData)
-    .eq('session_id', sessionId)
+    .eq('session_id', sessionIdInt)
     .select(`
       *,
       charging_points (
         point_id,
         name,
         power_kw,
-        stations (
-          station_id,
-          name,
-          address,
-          price_per_kwh
-        )
+        station_id
       ),
       vehicles (
         vehicle_id,
@@ -380,6 +451,25 @@ async function stopSession(sessionId, meter_end) {
   if (updateErr) {
     console.error('Error updating session:', updateErr);
     throw updateErr;
+  }
+
+  if (!updatedSession) {
+    const err = new Error('Session was not updated');
+    err.status = 500;
+    throw err;
+  }
+
+  // Lấy thông tin station riêng
+  if (updatedSession.charging_points && updatedSession.charging_points.station_id) {
+    const { data: station } = await supabaseAdmin
+      .from('stations')
+      .select('station_id, name, address, price_per_kwh')
+      .eq('station_id', updatedSession.charging_points.station_id)
+      .single();
+    
+    if (station && updatedSession.charging_points) {
+      updatedSession.charging_points.stations = station;
+    }
   }
 
   // Cập nhật trạng thái charging point về Available
