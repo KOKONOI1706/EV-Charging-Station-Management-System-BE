@@ -38,28 +38,39 @@ router.get('/stats', async (req, res) => {
 // Helper function to get revenue statistics
 async function getRevenueStats() {
   const now = new Date();
-  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  // Last 30 days (instead of "this month")
+  const last30Days = new Date(now);
+  last30Days.setDate(now.getDate() - 30);
+  last30Days.setHours(0, 0, 0, 0);
+  
+  // Today = from 00:00:00 today
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  
+  // Week start (Sunday)
   const weekStart = new Date(now);
   weekStart.setDate(now.getDate() - now.getDay());
   weekStart.setHours(0, 0, 0, 0);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  
+  // Year start
   const yearStart = new Date(now.getFullYear(), 0, 1);
 
-  console.log('Revenue calculation periods:');
-  console.log('  Last 24h:', last24h.toISOString());
+  console.log('\n=== REVENUE CALCULATION PERIODS ===');
+  console.log('  Today start:', todayStart.toISOString());
   console.log('  Week start:', weekStart.toISOString());
-  console.log('  Month start:', monthStart.toISOString());
+  console.log('  Last 30 days:', last30Days.toISOString());
   console.log('  Year start:', yearStart.toISOString());
 
-  // Get completed sessions for different periods
+  // Get all completed sessions from year start to now
   const { data: sessions, error } = await supabaseAdmin
     .from('charging_sessions')
-    .select('cost, end_time, start_time')
+    .select('cost, end_time, start_time, session_id')
     .eq('status', 'Completed')
-    .gte('end_time', last24h.toISOString());
+    .gte('end_time', yearStart.toISOString());
 
   if (error) {
-    console.error('Error fetching revenue:', error);
+    console.error('❌ Error fetching revenue sessions:', error);
     return {
       today: 0,
       thisWeek: 0,
@@ -69,22 +80,39 @@ async function getRevenueStats() {
     };
   }
 
-  const last24hSessions = sessions?.filter(s => new Date(s.end_time) >= last24h) || [];
+  console.log(`\n📊 Total completed sessions fetched: ${sessions?.length || 0}`);
+  
+  // Filter sessions by period
+  const todaySessions = sessions?.filter(s => new Date(s.end_time) >= todayStart) || [];
   const weekSessions = sessions?.filter(s => new Date(s.end_time) >= weekStart) || [];
-  const monthSessions = sessions?.filter(s => new Date(s.end_time) >= monthStart) || [];
-  const yearSessions = sessions?.filter(s => new Date(s.end_time) >= yearStart) || [];
+  const last30DaysSessions = sessions?.filter(s => new Date(s.end_time) >= last30Days) || [];
+  const yearSessions = sessions || [];
 
-  console.log('  Last 24h sessions:', last24hSessions.length, last24hSessions.length > 0 ? '\n    Sample: ' + JSON.stringify(last24hSessions[0]) : '');
-  console.log('  Week sessions:', weekSessions.length);
-  console.log('  Month sessions:', monthSessions.length);
-  console.log('  Year sessions:', yearSessions.length);
+  console.log('📈 Sessions by period:');
+  console.log('  Today:', todaySessions.length, 'sessions');
+  console.log('  This week:', weekSessions.length, 'sessions');
+  console.log('  Last 30 days:', last30DaysSessions.length, 'sessions');
+  console.log('  Year to date:', yearSessions.length, 'sessions');
 
-  const today = last24hSessions.reduce((sum, s) => sum + parseFloat(s.cost || 0), 0);
+  // Calculate revenue
+  const today = todaySessions.reduce((sum, s) => sum + parseFloat(s.cost || 0), 0);
   const thisWeek = weekSessions.reduce((sum, s) => sum + parseFloat(s.cost || 0), 0);
-  const thisMonth = monthSessions.reduce((sum, s) => sum + parseFloat(s.cost || 0), 0);
+  const thisMonth = last30DaysSessions.reduce((sum, s) => sum + parseFloat(s.cost || 0), 0);
   const yearToDate = yearSessions.reduce((sum, s) => sum + parseFloat(s.cost || 0), 0);
 
-  console.log('Revenue totals:', { today, thisWeek, thisMonth, yearToDate });
+  console.log('\n💰 Revenue totals:');
+  console.log('  Today:', today.toLocaleString('vi-VN'), 'VND');
+  console.log('  This week:', thisWeek.toLocaleString('vi-VN'), 'VND');
+  console.log('  Last 30 days (thisMonth):', thisMonth.toLocaleString('vi-VN'), 'VND');
+  console.log('  Year to date:', yearToDate.toLocaleString('vi-VN'), 'VND');
+
+  if (todaySessions.length > 0) {
+    console.log('\n📝 Sample today session:', {
+      session_id: todaySessions[0].session_id,
+      cost: todaySessions[0].cost,
+      end_time: todaySessions[0].end_time
+    });
+  }
 
   return {
     today,
