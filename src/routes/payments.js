@@ -15,6 +15,16 @@ router.post('/momo/create', (req, res, next) => {
   next();
 }, paymentController.createPaymentSession);
 
+// POST /api/payments/momo/package/create - Create MoMo payment for package
+router.post('/momo/package/create', (req, res, next) => {
+  console.log('🎯 Received MoMo package payment request:', {
+    package_id: req.body.package_id,
+    user_id: req.body.user_id,
+    amount: req.body.amount
+  });
+  next();
+}, paymentController.createPackagePaymentSession);
+
 // POST /api/payments/momo/ipn - MoMo IPN callback (webhook)
 router.post('/momo/ipn', paymentController.handleMoMoIPN);
 

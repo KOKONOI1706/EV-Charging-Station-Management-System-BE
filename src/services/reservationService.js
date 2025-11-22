@@ -54,16 +54,45 @@ class ReservationService {
         throw new Error(`Cannot reserve: Point is ${point.status}`);
       }
 
-      // 2. Check if user has active reservation
-      const { data: existingReservation } = await supabase
+      // 2. Auto-cancel any active/confirmed bookings for this user
+      console.log('🧹 Auto-checking for old reservations for user:', userId);
+      const { data: existingReservations } = await supabase
         .from('bookings')
         .select('booking_id, point_id')
         .eq('user_id', userId)
-        .in('status', ['Confirmed', 'Active'])
-        .maybeSingle();
+        .in('status', ['Confirmed', 'Active']);
 
-      if (existingReservation) {
-        throw new Error('You already have an active reservation');
+      if (existingReservations && existingReservations.length > 0) {
+        console.log(`📋 Found ${existingReservations.length} old booking(s) - auto-cancelling...`);
+        
+        // Cancel old bookings
+        const { error: cancelError } = await supabase
+          .from('bookings')
+          .update({
+            status: 'Canceled',
+            canceled_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+          .in('status', ['Confirmed', 'Active']);
+        
+        if (cancelError) {
+          console.warn('⚠️ Failed to auto-cancel old bookings:', cancelError);
+        } else {
+          console.log(`✅ Auto-cancelled ${existingReservations.length} old booking(s)`);
+        }
+        
+        // Release charging points from old bookings
+        const oldPointIds = existingReservations.map(b => b.point_id).filter(Boolean);
+        if (oldPointIds.length > 0) {
+          await supabase
+            .from('charging_points')
+            .update({ status: 'Available' })
+            .in('point_id', oldPointIds);
+          console.log(`✅ Released ${oldPointIds.length} charging point(s) from old bookings`);
+        }
+      } else {
+        console.log('ℹ️ No old bookings to clean up');
       }
 
       // 3. Check if user has active session
