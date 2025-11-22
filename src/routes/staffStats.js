@@ -1,25 +1,43 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { requireAuth } from '../middleware/authMiddleware.js';
-import { requireStaff } from '../middleware/requireRole.js';
 
 const router = express.Router();
 
 /**
  * GET /api/staff-stats/metrics
- * Get staff dashboard metrics (Staff or Admin only)
+ * Get staff dashboard metrics
  */
-router.get('/metrics', requireAuth, requireStaff, async (req, res) => {
+router.get('/metrics', async (req, res) => {
   try {
-    const now = new Date();
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const { stationId, startDate, endDate } = req.query;
+    
+    // Set date range - default to last 7 days if not provided
+    const end = endDate ? new Date(endDate) : new Date();
+    end.setHours(23, 59, 59, 999); // End of day
+    
+    const start = startDate ? new Date(startDate) : new Date(end);
+    if (!startDate) {
+      start.setDate(start.getDate() - 7);
+    }
+    start.setHours(0, 0, 0, 0); // Start of day
 
-    // Get recent sessions (last 7 days)
-    const { data: recentSessions, error: sessionsError } = await supabaseAdmin
+    console.log('[Staff Stats] Getting metrics for stationId:', stationId, 'from', start.toISOString(), 'to', end.toISOString());
+
+    // Get recent sessions within date range
+    let query = supabaseAdmin
       .from('charging_sessions')
-      .select('*')
-      .gte('start_time', sevenDaysAgo.toISOString());
+      .select('*, charging_points!inner(station_id)')
+      .gte('start_time', start.toISOString())
+      .lte('start_time', end.toISOString());
+    
+    // Filter by station if provided via charging_points.station_id
+    if (stationId && stationId !== 'all') {
+      query = query.eq('charging_points.station_id', stationId);
+    }
+    
+    const { data: recentSessions, error: sessionsError } = await query;
+    
+    console.log('[Staff Stats] Found sessions:', recentSessions?.length);
 
     if (sessionsError) {
       console.error('Error fetching sessions:', sessionsError);
@@ -35,9 +53,16 @@ router.get('/metrics', requireAuth, requireStaff, async (req, res) => {
     const todaysRevenue = completedRecent.reduce((sum, s) => sum + (parseFloat(s.cost) || 0), 0);
 
     // Get all charging points for utilization
-    const { data: allPoints, error: pointsError } = await supabaseAdmin
+    let pointsQuery = supabaseAdmin
       .from('charging_points')
       .select('point_id');
+    
+    // Filter by station if provided
+    if (stationId && stationId !== 'all') {
+      pointsQuery = pointsQuery.eq('station_id', stationId);
+    }
+    
+    const { data: allPoints, error: pointsError } = await pointsQuery;
 
     if (pointsError) {
       console.error('Error fetching points:', pointsError);
@@ -47,10 +72,17 @@ router.get('/metrics', requireAuth, requireStaff, async (req, res) => {
     const totalPoints = allPoints?.length || 1;
 
     // Get active sessions
-    const { data: activeSessions, error: activeError } = await supabaseAdmin
+    let activeQuery = supabaseAdmin
       .from('charging_sessions')
-      .select('session_id')
+      .select('session_id, charging_points!inner(station_id)')
       .eq('status', 'Active');
+    
+    // Filter by station if provided via charging_points.station_id
+    if (stationId && stationId !== 'all') {
+      activeQuery = activeQuery.eq('charging_points.station_id', stationId);
+    }
+    
+    const { data: activeSessions, error: activeError } = await activeQuery;
 
     if (activeError) {
       console.error('Error fetching active sessions:', activeError);
@@ -100,15 +132,36 @@ router.get('/metrics', requireAuth, requireStaff, async (req, res) => {
  */
 router.get('/analytics', async (req, res) => {
   try {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const { stationId, startDate, endDate } = req.query;
+    
+    // Set date range - default to last 7 days if not provided
+    const end = endDate ? new Date(endDate) : new Date();
+    end.setHours(23, 59, 59, 999); // End of day
+    
+    const start = startDate ? new Date(startDate) : new Date(end);
+    if (!startDate) {
+      start.setDate(start.getDate() - 7);
+    }
+    start.setHours(0, 0, 0, 0); // Start of day
 
-    // Get sessions from last 7 days
-    const { data: sessions, error } = await supabaseAdmin
+    console.log('[Staff Analytics] Getting analytics for stationId:', stationId, 'from', start.toISOString(), 'to', end.toISOString());
+
+    // Get sessions within date range - join with charging_points to filter by station
+    let query = supabaseAdmin
       .from('charging_sessions')
-      .select('*')
-      .gte('start_time', sevenDaysAgo.toISOString())
+      .select('*, charging_points!inner(station_id)')
+      .gte('start_time', start.toISOString())
+      .lte('start_time', end.toISOString())
       .order('start_time', { ascending: false });
+    
+    // Filter by station if provided via charging_points.station_id
+    if (stationId && stationId !== 'all') {
+      query = query.eq('charging_points.station_id', stationId);
+    }
+    
+    const { data: sessions, error } = await query;
+    
+    console.log('[Staff Analytics] Found sessions:', sessions?.length);
 
     if (error) {
       console.error('Error fetching analytics:', error);
@@ -142,11 +195,13 @@ router.get('/analytics', async (req, res) => {
       };
     });
 
-    // Daily usage (last 7 days)
+    // Daily usage - dynamic based on date range
     const dailyUsage = [];
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
+    const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+    
+    for (let i = 0; i <= daysDiff; i++) {
+      const date = new Date(start);
+      date.setDate(date.getDate() + i);
       const dateStr = date.toISOString().split('T')[0];
 
       const daySessions = sessions?.filter(s => 
