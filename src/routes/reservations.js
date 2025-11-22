@@ -54,7 +54,11 @@ router.get('/active', async (req, res) => {
       });
     }
 
+    console.log('🔍 Getting active reservation for user:', userId);
+
     const result = await reservationService.getActiveReservation(parseInt(userId));
+
+    console.log('📊 Active reservation result:', result);
 
     if (!result.success) {
       return res.status(400).json(result);
@@ -288,7 +292,7 @@ router.put('/:id/status', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.query; // Changed from req.body to req.query
+    const { userId } = req.query;
 
     if (!userId) {
       return res.status(400).json({
@@ -297,7 +301,11 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
+    console.log('🔍 Cancelling reservation:', id, 'for user:', userId);
+
     const result = await reservationService.cancelReservation(parseInt(id), parseInt(userId));
+
+    console.log('📊 Cancel result:', result);
 
     if (!result.success) {
       return res.status(400).json(result);

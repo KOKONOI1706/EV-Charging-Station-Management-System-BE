@@ -57,12 +57,17 @@ class ReservationService {
       // 2. Check if user has active reservation
       const { data: existingReservation } = await supabase
         .from('bookings')
-        .select('booking_id, point_id')
+        .select('booking_id, point_id, status, created_at, expire_time')
         .eq('user_id', userId)
         .in('status', ['Confirmed', 'Active'])
+        .order('start_time', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
+      console.log('🔍 Checking existing reservations for user:', userId, 'found:', existingReservation);
+
       if (existingReservation) {
+        console.log('❌ User already has active reservation:', existingReservation);
         throw new Error('You already have an active reservation');
       }
 
@@ -161,14 +166,13 @@ class ReservationService {
         .single();
 
       if (fetchError || !reservation) {
+        console.log('Reservation not found for cancel:', reservationId, userId, fetchError);
         throw new Error('Reservation not found');
       }
 
-      if (reservation.status !== 'Confirmed') {
-        throw new Error(`Cannot cancel: Reservation is ${reservation.status}`);
-      }
+      console.log('Cancelling reservation:', reservationId, 'current status:', reservation.status);
 
-      // Update status
+      // Always update status to Cancelled (even if already cancelled/expired)
       const { data: updated, error: updateError } = await supabase
         .from('bookings')
         .update({ 
@@ -181,17 +185,23 @@ class ReservationService {
         .single();
 
       if (updateError) {
+        console.error('Error updating booking status:', updateError);
         throw updateError;
       }
 
-      // Release the charging point
-      await supabase
+      // Always release the charging point to Available
+      const { error: pointError } = await supabase
         .from('charging_points')
         .update({ 
           status: 'Available',
           updated_at: new Date().toISOString()
         })
         .eq('point_id', reservation.point_id);
+
+      if (pointError) {
+        console.error('Error updating charging point status:', pointError);
+        // Don't throw, as booking was cancelled
+      }
 
       console.log(`✅ Reservation cancelled: ${reservationId}`);
       console.log(`🔓 Charging point ${reservation.point_id} released (Available)`);
