@@ -1,12 +1,10 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { requireAuth } from '../middleware/authMiddleware.js';
-import { requireAdmin } from '../middleware/requireRole.js';
 
 const router = express.Router();
 
-// GET /api/admin/stats - Get all dashboard statistics (Admin only)
-router.get('/stats', requireAuth, requireAdmin, async (req, res) => {
+// GET /api/admin/stats - Get all dashboard statistics
+router.get('/stats', async (req, res) => {
   try {
     console.log('\n=== ADMIN STATS REQUEST START ===');
     console.log('1. Fetching revenue...');

@@ -1,8 +1,6 @@
 import express from 'express';
 import supabase from '../supabase/client.js';
 import sessionManagementService from '../services/sessionManagementService.js';
-import { requireAuth } from '../middleware/authMiddleware.js';
-import { requireStaff, requireOwnershipOrRole } from '../middleware/requireRole.js';
 
 const router = express.Router();
 
@@ -15,9 +13,8 @@ const router = express.Router();
 /**
  * POST /api/charging-sessions/from-reservation
  * Start charging session from a valid reservation
- * Requires authentication - user can only start their own sessions
  */
-router.post('/from-reservation', requireAuth, async (req, res) => {
+router.post('/from-reservation', async (req, res) => {
   try {
     const {
       userId,
@@ -28,15 +25,6 @@ router.post('/from-reservation', requireAuth, async (req, res) => {
       initialBatteryPercent,
       targetBatteryPercent
     } = req.body;
-
-    // Verify user is starting their own session (unless staff/admin)
-    if (req.user.role === 0 && userId.toString() !== req.user.id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden',
-        message: 'You can only start charging sessions for your own account'
-      });
-    }
 
     if (!userId || !pointId || !reservationId || meterStart === undefined) {
       return res.status(400).json({
@@ -72,9 +60,8 @@ router.post('/from-reservation', requireAuth, async (req, res) => {
 /**
  * POST /api/charging-sessions/direct
  * Start charging session directly (without reservation)
- * Requires authentication - user can only start their own sessions
  */
-router.post('/direct', requireAuth, async (req, res) => {
+router.post('/direct', async (req, res) => {
   try {
     const {
       userId,
@@ -84,15 +71,6 @@ router.post('/direct', requireAuth, async (req, res) => {
       initialBatteryPercent,
       targetBatteryPercent
     } = req.body;
-
-    // Verify user is starting their own session (unless staff/admin)
-    if (req.user.role === 0 && userId.toString() !== req.user.id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden',
-        message: 'You can only start charging sessions for your own account'
-      });
-    }
 
     if (!userId || !pointId || meterStart === undefined) {
       return res.status(400).json({
