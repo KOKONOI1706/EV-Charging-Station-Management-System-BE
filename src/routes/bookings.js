@@ -382,4 +382,82 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// POST /api/bookings/cancel-all-active - Cancel all active bookings for a user
+router.post('/cancel-all-active', async (req, res) => {
+  try {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'user_id is required'
+      });
+    }
+
+    console.log(`🗑️ Cancelling all active bookings for user ${user_id}`);
+
+    // Get all active bookings (including Confirmed status for reservations)
+    const { data: activeBookings, error: fetchError } = await supabase
+      .from('bookings')
+      .select('booking_id, point_id')
+      .eq('user_id', user_id)
+      .in('status', ['Active', 'Confirmed']);
+
+    if (fetchError) throw fetchError;
+
+    if (!activeBookings || activeBookings.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No active bookings to cancel',
+        cancelled_count: 0
+      });
+    }
+
+    console.log(`📋 Found ${activeBookings.length} active/confirmed bookings to cancel`);
+
+    // Cancel all active/confirmed bookings
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update({
+        status: 'Canceled',
+        canceled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', user_id)
+      .in('status', ['Active', 'Confirmed']);
+
+    if (updateError) throw updateError;
+
+    // Release all charging points
+    const pointIds = activeBookings.map(b => b.point_id).filter(Boolean);
+    
+    if (pointIds.length > 0) {
+      const { error: releaseError } = await supabase
+        .from('charging_points')
+        .update({ status: 'Available' })
+        .in('point_id', pointIds);
+
+      if (releaseError) {
+        console.warn('⚠️ Error releasing charging points:', releaseError);
+      } else {
+        console.log(`✅ Released ${pointIds.length} charging points`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Cancelled ${activeBookings.length} active booking(s)`,
+      cancelled_count: activeBookings.length
+    });
+
+  } catch (error) {
+    console.error('Error cancelling all active bookings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cancel bookings',
+      message: error.message
+    });
+  }
+});
+
 export default router;
