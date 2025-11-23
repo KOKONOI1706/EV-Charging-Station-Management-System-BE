@@ -22,18 +22,22 @@ router.post("/cancel/:userId", async (req, res) => {
       });
     }
 
-    // Find active package
-    const { data: activePackage, error: findError } = await supabase
+    // Find active package (remove .single() to avoid error if not found)
+    const { data: packages, error: findError } = await supabase
       .from('user_packages')
       .select('*')
       .eq('user_id', parseInt(userId))
       .eq('status', 'active')
       .gte('end_date', new Date().toISOString())
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
-    if (findError || !activePackage) {
+    if (findError) {
+      console.error('Error finding package:', findError);
+      throw findError;
+    }
+
+    if (!packages || packages.length === 0) {
       return res.status(404).json({
         success: false,
         error: 'No active package found',
@@ -41,16 +45,18 @@ router.post("/cancel/:userId", async (req, res) => {
       });
     }
 
+    const activePackage = packages[0];
+
     // Update package status to cancelled
     const { error: updateError } = await supabase
       .from('user_packages')
       .update({
-        status: 'cancelled',
-        updated_at: new Date().toISOString()
+        status: 'cancelled'
       })
       .eq('user_package_id', activePackage.user_package_id);
 
     if (updateError) {
+      console.error('Error updating package:', updateError);
       throw updateError;
     }
 
