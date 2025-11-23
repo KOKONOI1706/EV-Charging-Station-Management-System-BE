@@ -117,7 +117,8 @@ async function startSession({ userId, vehicleId, stationId, pointId = null, mete
           name,
           address,
           price_per_kwh
-        )
+        ),
+        price_rate
       ),
       vehicles (
         vehicle_id,
@@ -226,6 +227,7 @@ async function stopSession(sessionId, meter_end) {
         name,
         power_kw,
         station_id,
+        price_rate,
         stations (
           station_id,
           name,
@@ -305,9 +307,11 @@ async function stopSession(sessionId, meter_end) {
     }
   }
 
-  // Lấy giá điện từ station hoặc charging point
+  // Lấy giá điện - Prioritize charging_points.price_rate
   let pricePerKwh = null;
-  if (session.charging_points?.stations?.price_per_kwh) {
+  if (session.charging_points?.price_rate) {
+    pricePerKwh = parseFloat(session.charging_points.price_rate);
+  } else if (session.charging_points?.stations?.price_per_kwh) {
     pricePerKwh = parseFloat(session.charging_points.stations.price_per_kwh);
   } else if (session.charging_points?.price_per_kwh) {
     pricePerKwh = parseFloat(session.charging_points.price_per_kwh);
@@ -363,6 +367,7 @@ async function stopSession(sessionId, meter_end) {
         point_id,
         name,
         power_kw,
+        price_rate,
         stations (
           station_id,
           name,

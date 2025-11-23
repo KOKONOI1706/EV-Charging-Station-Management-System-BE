@@ -210,8 +210,10 @@ class SessionManagementService {
       energyConsumed = cappedEnergy;
       const finalMeterEnd = meterEnd || (session.meter_start + energyConsumed);
 
-      // Calculate cost
-      let pricePerKwh = session.charging_points?.stations?.price_per_kwh || 5000;
+      // Calculate cost - Prioritize charging_points.price_rate
+      let pricePerKwh = session.charging_points?.price_rate 
+        || session.charging_points?.stations?.price_per_kwh 
+        || 5000;
       if (pricePerKwh < 10) {
         pricePerKwh = pricePerKwh * 24000;
       }
