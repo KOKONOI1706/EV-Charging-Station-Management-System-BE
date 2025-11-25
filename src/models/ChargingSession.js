@@ -1,5 +1,37 @@
+/**
+ * ========================================
+ * CHARGING SESSION MODEL
+ * ========================================
+ * Model để thao tác với bảng charging_sessions trong database
+ * 
+ * Chức năng:
+ * - CRUD operations cho charging sessions
+ * - Lọc sessions theo nhiều tiêu chí:
+ *   + Theo user (Driver xem sessions của mình)
+ *   + Theo station (Staff xem sessions tại trạm của họ)
+ *   + Theo status, date range (Admin xem tất cả)
+ * - Join với các bảng liên quan:
+ *   + users: Thông tin người dùng
+ *   + vehicles: Thông tin xe
+ *   + charging_points: Thông tin điểm sạc
+ *   + stations: Thông tin trạm sạc
+ *   + bookings: Thông tin đặt chỗ
+ *   + payments: Thông tin thanh toán
+ * 
+ * Cấu trúc dữ liệu trả về:
+ * - Nested objects cho relationships (Supabase auto-join)
+ * - Sắp xếp theo start_time giảm dần (mới nhất trước)
+ * - Bao gồm cả real-time calculated fields:
+ *   + current_meter, estimated_cost, battery_progress
+ *   + charging_rate_kw, estimated_minutes_remaining
+ */
+
+// Import Supabase client
 import { supabase } from '../config/supabase.js';
 
+/**
+ * Class ChargingSession - Model cho phiên sạc
+ */
 class ChargingSession {
   // Get all sessions (Admin only - with filters)
   static async getAll(filters = {}) {

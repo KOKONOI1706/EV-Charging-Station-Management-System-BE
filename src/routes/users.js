@@ -1,10 +1,55 @@
+/**
+ * ========================================
+ * USERS ROUTES
+ * ========================================
+ * API endpoints để quản lý người dùng
+ * 
+ * Chức năng chính:
+ * - Đăng ký tài khoản mới (register)
+ * - Đăng nhập (login)
+ * - Đổi mật khẩu (change password)
+ * - Quên mật khẩu (forgot/reset password)
+ * - Xác thực email (verify email)
+ * - Cập nhật profile
+ * - Lấy danh sách users (Admin only)
+ * - Quản lý role (Admin only)
+ * 
+ * Phân quyền roles:
+ * - Driver (customer): Người dùng thường
+ * - Station Manager (staff): Nhân viên quản lý trạm
+ * - Admin: Quản trị viên hệ thống
+ * 
+ * Bảo mật:
+ * - Mật khẩu được hash bằng bcrypt (10 rounds)
+ * - Email verification bắt buộc khi đăng ký
+ * - Password reset token hết hạn sau 1 giờ
+ * - Không trả password hash về client
+ * 
+ * Email notifications:
+ * - Gửi email xác thực khi đăng ký
+ * - Gửi welcome email sau khi verify
+ * - Gửi reset password link khi quên mật khẩu
+ */
+
+// Import Express Router
 import express from 'express';
+
+// Import bcrypt để hash password
 import bcrypt from 'bcryptjs';
+
+// Import User model
 import { UserModel } from '../models/User.js';
+
+// Import Supabase clients (admin và regular)
 import { supabase, supabaseAdmin } from '../config/supabase.js';
+
+// Import verification services (lưu mã xác thực trong memory)
 import { createCode, verifyCode, isVerified, clearVerification } from '../services/verificationStore.js';
+
+// Import email services
 import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../services/emailService.js';
 
+// Tạo router instance
 const router = express.Router();
 
 // GET /api/users - Get all users with pagination and stats (admin only)

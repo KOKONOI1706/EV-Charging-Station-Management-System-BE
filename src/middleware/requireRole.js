@@ -1,10 +1,67 @@
 /**
- * Role-Based Access Control (RBAC) Middleware
+ * ===============================================================
+ * ROLE-BASED ACCESS CONTROL (RBAC) MIDDLEWARE
+ * ===============================================================
+ * Middleware phân quyền theo vai trò user (Customer, Staff, Admin)
  * 
  * Role Hierarchy:
- * - 0: Customer (lowest privilege)
- * - 1: Staff
- * - 2: Admin (highest privilege)
+ * - 0: Customer (khách hàng - quyền thấp nhất)
+ * - 1: Staff (nhân viên quản lý trạm sạc)
+ * - 2: Admin (quản trị viên - quyền cao nhất)
+ * 
+ * Middleware functions:
+ * 
+ * 1. requireRole(allowedRoles: number[])
+ *    - Cho phép truy cập nếu user.role nằm trong allowedRoles
+ *    - Response 403 Forbidden nếu không đủ quyền
+ *    - Example: requireRole([1, 2]) → Chỉ Staff và Admin
+ * 
+ * 2. requireAdmin
+ *    - Shorthand cho requireRole([2])
+ *    - Chỉ Admin mới được truy cập
+ * 
+ * 3. requireStaff
+ *    - Shorthand cho requireRole([1, 2])
+ *    - Staff hoặc Admin được truy cập
+ * 
+ * 4. requireCustomer
+ *    - Shorthand cho requireRole([0, 1, 2])
+ *    - Bất kỳ user authenticated nào cũng được (tất cả roles)
+ * 
+ * 5. requireOwnership(resourceUserIdField = 'userId')
+ *    - Cho phép nếu user sở hữu resource (user.id === resource.userId)
+ *    - Admin bypass: Admin luôn có quyền truy cập mọi resource
+ *    - Example: User chỉ xem được booking của chính mình
+ * 
+ * 6. requireOwnershipOrRole(allowedRoles, resourceUserIdField)
+ *    - Cho phép nếu user có role trong allowedRoles HOẶC sở hữu resource
+ *    - Example: Customer xem booking của mình, Staff xem tất cả bookings
+ * 
+ * 7. auditAccess
+ *    - Log tất cả access attempts để security audit
+ *    - Format: [AUDIT] timestamp - User email (Role) - METHOD PATH - IP
+ * 
+ * Error responses:
+ * - 401 Unauthorized: Chưa authenticate (req.user === null)
+ * - 403 Forbidden: Đã authenticate nhưng không đủ quyền
+ * - 400 Bad Request: Thiếu resourceUserIdField khi check ownership
+ * 
+ * Usage example:
+ * ```javascript
+ * router.get('/bookings', requireAuth, requireCustomer, getBookings);
+ * router.post('/stations', requireAuth, requireAdmin, createStation);
+ * router.get('/bookings/:id', requireAuth, requireOwnership('userId'), getBooking);
+ * ```
+ * 
+ * Dependencies:
+ * - requireAuth middleware: Phải chạy trước để có req.user
+ */
+
+/**
+ * ===== ROLE HIERARCHY =====
+ * 0: Customer (lowest privilege)
+ * 1: Staff
+ * 2: Admin (highest privilege)
  */
 
 /**

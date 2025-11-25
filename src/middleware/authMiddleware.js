@@ -1,8 +1,52 @@
+/**
+ * ===============================================================
+ * AUTHENTICATION MIDDLEWARE (BACKEND)
+ * ===============================================================
+ * Middleware xác thực JWT token và gắn thông tin user vào request
+ * 
+ * Chức năng:
+ * - 🔐 Xác thực token từ header Authorization: Bearer <token>
+ * - 👤 Load thông tin user từ database theo token
+ * - 🎭 Map role từ DB (Driver, Station Manager, Admin) → Frontend (customer, staff, admin)
+ * - ✅ Kiểm tra user is_active = true
+ * - 🔓 Optional auth: Cho phép request không có token (public endpoints)
+ * 
+ * Token format:
+ * - Demo token: "demo_token_<userId>" (temporary, for testing)
+ * - Real JWT: "Bearer <jwt_token>" (TODO: chưa implement JWT verify)
+ * 
+ * Response nếu fail:
+ * - 401 Unauthorized: Token không hợp lệ hoặc user không tồn tại
+ * - Error messages: "No token provided", "Invalid token format", "Invalid or expired token"
+ * 
+ * req.user sau khi authenticated:
+ * ```javascript
+ * {
+ *   id: user_id,
+ *   email: string,
+ *   name: string,
+ *   phone: string,
+ *   role: 0 | 1 | 2,  // 0=customer, 1=staff, 2=admin
+ *   roleName: 'customer' | 'staff' | 'admin',
+ *   roleId: database role_id,
+ *   isActive: boolean
+ * }
+ * ```
+ * 
+ * Exports:
+ * - requireAuth: Bắt buộc phải có token hợp lệ
+ * - optionalAuth: Token optional, vẫn next() nếu không có
+ * 
+ * Dependencies:
+ * - Supabase Admin: Query users table với role join
+ * - JWT library: (TODO) Cần implement cho production
+ */
+
 import { supabaseAdmin } from '../config/supabase.js';
 
 /**
- * Authentication Middleware
- * Verifies JWT token and attaches user info to request
+ * ===== MIDDLEWARE: requireAuth =====
+ * Bắt buộc phải có token hợp lệ, reject nếu không có hoặc invalid
  */
 export const requireAuth = async (req, res, next) => {
   try {
