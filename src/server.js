@@ -1,48 +1,92 @@
+/**
+ * ========================================
+ * EXPRESS SERVER - BACKEND API
+ * ========================================
+ * Máy chủ backend cho hệ thống quản lý trạm sạc xe điện
+ * 
+ * Cấu trúc:
+ * - Express.js framework
+ * - RESTful API endpoints
+ * - CORS được cấu hình cho development và production
+ * - Integration với Supabase database
+ * 
+ * API Endpoints chính:
+ * - /api/users: Quản lý người dùng (login, register, profile)
+ * - /api/stations: Quản lý trạm sạc
+ * - /api/charging-points: Quản lý điểm sạc
+ * - /api/charging-sessions: Quản lý phiên sạc
+ * - /api/bookings: Đặt chỗ sạc
+ * - /api/reservations: Quản lý đặt chỗ
+ * - /api/payments: Xử lý thanh toán (MoMo integration)
+ * - /api/vehicles: Quản lý xe của user
+ * - /api/packages: Quản lý gói dịch vụ
+ * - /api/analytics: Thống kê và báo cáo
+ * - /api/staff-stats: Thống kê cho staff
+ * - /api/admin: Quản lý cho admin
+ * 
+ * Services:
+ * - chargingScheduler: Tự động cập nhật trạng thái phiên sạc
+ * - emailService: Gửi email thông báo
+ * - paymentController: Xử lý thanh toán MoMo
+ * 
+ * Environment Variables:
+ * - PORT: Cổng chạy server (default: 5000)
+ * - FRONTEND_URL: URL của frontend để CORS
+ * - SUPABASE_URL: URL Supabase database
+ * - SUPABASE_KEY: API key Supabase
+ * - MOMO_*: Cấu hình MoMo payment gateway
+ */
+
+// Import Express và middleware
 import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import cors from 'cors';              // Middleware xử lý CORS
+import dotenv from 'dotenv';          // Load environment variables
+import path from 'path';              // Xử lý đường dẫn file
+import { fileURLToPath } from 'url';  // Helper cho ES modules
 
-// Import routes
-import usersRouter from './routes/users.js';
-import stationsRouter from './routes/stations.js';
-import bookingsRouter from './routes/bookings.js';
-import reservationsRouter from './routes/reservations.js';
-import chargingPointsRouter from './routes/chargingPoints.js';
-import chargingSessionsRouter from './routes/chargingSessions.js';
-import paymentsRouter from './routes/payments.js';
-import analyticsRouter from './routes/analytics.js';
-import packageRoutes from './routes/packageRoutes.js';
-import benefitsRouter from './routes/benefits.js';
-import vehiclesRouter from './routes/vehicles.js';
-import staffStatsRouter from './routes/staffStats.js';
-import staffRouter from './routes/staff.js';
-import userStationsRouter from './routes/userStations.js';
-import adminStatsRouter from './routes/adminStats.js';
+// Import các routes
+import usersRouter from './routes/users.js';                     // API người dùng
+import stationsRouter from './routes/stations.js';               // API trạm sạc
+import bookingsRouter from './routes/bookings.js';               // API đặt chỗ
+import reservationsRouter from './routes/reservations.js';       // API reservation
+import chargingPointsRouter from './routes/chargingPoints.js';   // API điểm sạc
+import chargingSessionsRouter from './routes/chargingSessions.js'; // API phiên sạc
+import paymentsRouter from './routes/payments.js';               // API thanh toán
+import analyticsRouter from './routes/analytics.js';             // API thống kê
+import packageRoutes from './routes/packageRoutes.js';           // API gói dịch vụ
+import vehiclesRouter from './routes/vehicles.js';               // API xe
+import staffStatsRouter from './routes/staffStats.js';           // API stats staff
+import userStationsRouter from './routes/userStations.js';       // API trạm user
+import adminStatsRouter from './routes/adminStats.js';           // API stats admin
 
-// Import scheduler
-import chargingScheduler from './services/chargingScheduler.js';
+// Import scheduler service
+import chargingScheduler from './services/chargingScheduler.js'; // Service tự động cập nhật
 
-// Get current directory for ES modules
+// Lấy đường dẫn thư mục hiện tại (ES modules không có __dirname)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from the correct path
+// Load biến môi trường từ file .env
 dotenv.config({ 
   path: path.join(__dirname, '..', '.env') 
 });
 
+// Khởi tạo Express app
 const app = express();
+
+// Lấy cổng từ environment hoặc dùng 5000
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration - Flexible for development and production
+/**
+ * Cấu hình CORS - Cho phép frontend kết nối
+ * Support nhiều origins cho development và production
+ */
 const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001', 
-  'http://localhost:5173',
-  process.env.FRONTEND_URL
-].filter(Boolean);
+  'http://localhost:3000',    // React default
+  'http://localhost:3001',    // React alternative
+  'http://localhost:5173',    // Vite default
+  process.env.FRONTEND_URL    // Production URL
+].filter(Boolean);            // Lọc bỏ giá trị undefined
 
 app.use(cors({
   origin: allowedOrigins,
@@ -79,12 +123,10 @@ app.use('/api/charging-sessions', chargingSessionsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/packages', packageRoutes);
-app.use('/api/benefits', benefitsRouter);
 app.use('/api/vehicles', vehiclesRouter);
 app.use('/api/staff-stats', staffStatsRouter);
 app.use('/api/user-stations', userStationsRouter);
 app.use('/api/admin', adminStatsRouter);
-app.use('/api/staff', staffRouter);
 
 // ✅ Basic route with API information
 app.get('/', (req, res) => {

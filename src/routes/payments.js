@@ -1,3 +1,40 @@
+/**
+ * ===============================================================
+ * PAYMENTS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes xử lý thanh toán qua MoMo và VNPay
+ * 
+ * Endpoints:
+ * 
+ * MoMo Payment:
+ * - POST /api/payments/momo/create - Tạo payment session (redirect user đến MoMo app)
+ * - POST /api/payments/momo/ipn - Webhook nhận kết quả thanh toán từ MoMo
+ * - GET /api/payments/momo/status/:orderId - Kiểm tra trạng thái thanh toán
+ * - POST /api/payments/momo/manual-complete - Manual complete (workaround cho localhost testing)
+ * 
+ * VNPay Payment:
+ * - POST /api/payments/vnpay/create - Tạo VNPay payment URL
+ * - GET /api/payments/vnpay/return - Callback sau khi user thanh toán xong
+ * - POST /api/payments/vnpay/ipn - Webhook từ VNPay
+ * 
+ * User History:
+ * - GET /api/payments/user/:userId - Lấy lịch sử thanh toán của user
+ * 
+ * Flow thanh toán:
+ * 1. Frontend gọi /momo/create với session_id, amount
+ * 2. Backend tạo payment record + gọi MoMo API → Nhận payUrl
+ * 3. Frontend redirect user đến payUrl (MoMo app/website)
+ * 4. User thanh toán → MoMo gửi IPN webhook đến backend
+ * 5. Backend cập nhật payment status, session status, tạo invoice
+ * 6. Frontend poll /status/:orderId để check kết quả
+ * 
+ * Dependencies:
+ * - paymentController: Logic xử lý MoMo/VNPay API
+ * - Supabase: Lưu payments, sessions, invoices
+ * - MoMo API: Partner code, access key, secret key
+ * - VNPay API: TMN code, hash secret
+ */
+
 import express from 'express';
 import supabase from '../supabase/client.js';
 import paymentController from '../controllers/paymentController.js';

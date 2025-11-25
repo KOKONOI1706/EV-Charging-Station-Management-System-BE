@@ -1,3 +1,44 @@
+/**
+ * ===============================================================
+ * BOOKINGS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes xử lý đặt chỗ sạc (bookings)
+ * 
+ * Endpoints:
+ * - GET /api/bookings - Lấy bookings của user hoặc tất cả
+ * - POST /api/bookings - Tạo booking mới
+ * - GET /api/bookings/:id - Lấy chi tiết 1 booking
+ * - PUT /api/bookings/:id/status - Cập nhật trạng thái booking
+ * - DELETE /api/bookings/:id - Hủy booking
+ * 
+ * Query params (GET /):
+ * - userId: Filter theo user_id
+ * - status: Filter theo status (Pending, Confirmed, Canceled, Completed)
+ * - limit: Số bookings trả về (mặc định 50)
+ * - offset: Pagination offset (mặc định 0)
+ * 
+ * Booking flow:
+ * 1. User tạo booking → status = Pending
+ * 2. System confirm (hoặc auto-confirm) → status = Confirmed
+ * 3. User check-in → Start charging session
+ * 4. Session kết thúc → status = Completed
+ * 5. User cancel hoặc hết hạn → status = Canceled
+ * 
+ * Validation:
+ * - Kiểm tra charging point có available không
+ * - Kiểm tra thời gian booking có trùng lặp không
+ * - Kiểm tra user tồn tại
+ * 
+ * Response joins:
+ * - users: user_id, name, email
+ * - charging_points: point_id, name, status, power_kw, station info
+ * - stations: id, name, address, city, lat, lng
+ * 
+ * Dependencies:
+ * - Supabase: Database operations
+ * - Middleware: requireAuth (xác thực user)
+ */
+
 import express from 'express';
 import supabase from '../supabase/client.js';
 

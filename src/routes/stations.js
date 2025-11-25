@@ -1,3 +1,33 @@
+/**
+ * ===============================================================
+ * STATIONS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes xử lý các API liên quan đến trạm sạc
+ * 
+ * Endpoints:
+ * - GET /api/stations - Lấy tất cả trạm (có filter theo location)
+ * - GET /api/stations/:id - Lấy chi tiết 1 trạm theo ID
+ * - POST /api/stations - Tạo trạm mới (Admin only)
+ * - PUT /api/stations/:id - Cập nhật thông tin trạm (Admin only)
+ * - DELETE /api/stations/:id - Xóa trạm (Admin only)
+ * 
+ * Features:
+ * - 📍 Location filtering: Tính khoảng cách, filter theo radius (km)
+ * - 🗺️ Distance calculation: Haversine formula (lat, lng)
+ * - 📊 Sorting: Sắp xếp theo khoảng cách gần nhất
+ * - 🔒 Authorization: CRUD operations yêu cầu Admin role
+ * - ✅ Validation: Kiểm tra required fields (name, address, lat, lng, price)
+ * 
+ * Query params (GET /stations):
+ * - lat, lng: Vị trí user để tính khoảng cách
+ * - radius: Bán kính tìm kiếm (km), mặc định 50km
+ * 
+ * Dependencies:
+ * - Supabase: Database stations table
+ * - Middleware: requireAuth, requireAdmin (cho CRUD)
+ * - Utils: calculateDistance() - Haversine formula
+ */
+
 import express from 'express';
 import supabase from '../supabase/client.js';
 
