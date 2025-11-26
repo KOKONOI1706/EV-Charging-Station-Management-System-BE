@@ -1,3 +1,79 @@
+/**
+ * ===============================================================
+ * STAFF STATISTICS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes cung cấp thống kê cho Staff Dashboard
+ * 
+ * Endpoints:
+ * - GET /api/staff-stats/metrics - Lấy metrics của station
+ * - GET /api/staff-stats/analytics - Lấy analytics data cho charts
+ * 
+ * Query params:
+ * - stationId: UUID của station (hoặc 'all' cho tất cả stations)
+ * - startDate: Ngày bắt đầu YYYY-MM-DD (optional, default = 7 days ago)
+ * - endDate: Ngày kết thúc YYYY-MM-DD (optional, default = today)
+ * 
+ * Metrics calculation:
+ * 
+ * 1. todaysSessions:
+ *    - Đếm sessions status=Completed trong date range
+ *    - Filter theo station nếu có
+ * 
+ * 2. todaysRevenue:
+ *    - Sum cost của completed sessions
+ * 
+ * 3. currentUtilization:
+ *    - activeSessions / totalPoints * 100
+ *    - activeSessions: Sessions có status=Active
+ *    - totalPoints: Tổng số charging points của station
+ * 
+ * 4. averageSessionDuration:
+ *    - Trung bình (end_time - start_time) của completed sessions
+ *    - Đơn vị: Phút
+ * 
+ * 5. customerSatisfaction:
+ *    - Mặc định 4.5 sao (TODO: fetch từ feedbacks table)
+ * 
+ * 6. maintenanceAlerts:
+ *    - Đếm charging points có status=Maintenance hoặc Offline
+ * 
+ * 7. percentageChanges:
+ *    - So sánh sessions/revenue với period trước
+ *    - VD: Hôm nay vs hôm qua, tuần này vs tuần trước
+ * 
+ * Analytics data:
+ * 
+ * 1. dailyUsage:
+ *    - Sessions và revenue theo ngày
+ *    - Group by DATE(start_time)
+ * 
+ * 2. hourlyPattern:
+ *    - Sessions theo giờ trong ngày (0-23h)
+ *    - Utilization: % chỗ đang dùng theo giờ
+ * 
+ * 3. weeklyTrend:
+ *    - Sessions và revenue theo ngày trong tuần
+ *    - 7 ngày gần đây
+ * 
+ * 4. recentSessions:
+ *    - 10 sessions gần đây nhất
+ *    - Bao gồm: customer name, duration, amount, status
+ * 
+ * Station filtering:
+ * - Nếu stationId='all': Lấy data của tất cả stations
+ * - Nếu stationId=UUID: Chỉ lấy data của station đó
+ * - Filter qua charging_points.station_id (join table)
+ * 
+ * Date range:
+ * - Mặc định: 7 ngày gần đây
+ * - startDate: 00:00:00
+ * - endDate: 23:59:59
+ * 
+ * Dependencies:
+ * - Supabase Admin: Query charging_sessions, charging_points
+ * - Date calculations: start/end of day
+ */
+
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 

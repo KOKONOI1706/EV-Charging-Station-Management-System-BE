@@ -1,3 +1,71 @@
+/**
+ * ===============================================================
+ * SESSION MANAGEMENT SERVICE (BACKEND)
+ * ===============================================================
+ * Service quản lý lifecycle của charging sessions
+ * 
+ * Chức năng:
+ * - ⚡ Bắt đầu session (startSession)
+ * - 🟡 Detect sessions gần đầy pin → AlmostDone status
+ * - 🔄 Cập nhật trạng thái charging points
+ * - ⏱️ Tính estimated completion time
+ * - 🔋 Battery tracking (initial % → target %)
+ * 
+ * Session Lifecycle:
+ * 1. Create reservation (optional)
+ * 2. startSession() → status=Active
+ * 3. Monitor battery progress
+ * 4. Battery >= 95% → Point status=AlmostDone (cảnh báo idle fee)
+ * 5. stopSession() → status=Completed
+ * 
+ * Methods:
+ * 
+ * 1. startSession({ userId, pointId, reservationId, vehicleId, meterStart, initialBatteryPercent, targetBatteryPercent })
+ *    - Validate reservation (nếu có)
+ *    - Check charging point Available/Reserved
+ *    - Check user không có active session khác
+ *    - Check point không bị occupied
+ *    - Tính estimated_completion_time dựa vào:
+ *      * Vehicle battery_capacity_kwh
+ *      * % cần sạc (target - initial)
+ *      * Charging power (point.power_kw)
+ *      * Formula: hoursNeeded = energyNeeded / chargingPower
+ *    - Tạo charging_sessions record
+ *    - Cập nhật charging_points.status = Occupied
+ *    - Cập nhật reservation.status = Active (nếu có)
+ * 
+ * 2. detectAlmostDoneSessions()
+ *    - Tìm sessions có battery_progress >= 95% và status=Active
+ *    - Cập nhật charging_points.status = AlmostDone
+ *    - Gửi notification cho user (TODO: implement)
+ *    - Return { updated: count }
+ * 
+ * 3. stopSession({ sessionId, meterEnd, idleMinutes })
+ *    - Validate session tồn tại và active
+ *    - Tính energy_consumed = meterEnd - meterStart
+ *    - Tính cost dựa vào energy + idle_fee
+ *    - Cập nhật session status = Completed
+ *    - Cập nhật charging_points.status = Available
+ * 
+ * Battery Progress Calculation:
+ * - current_battery = initial + (energy_consumed / battery_capacity) * 100
+ * - battery_progress = (current_battery - initial) / (target - initial) * 100
+ * - estimated_minutes_remaining = (energy_remaining / charging_power) * 60
+ * 
+ * Charging Point Status:
+ * - Available: Sẵn sàng
+ * - Reserved: Đang được đặt chỗ (reservation active)
+ * - Occupied: Đang có session active
+ * - AlmostDone: Pin >= 95%, cảnh báo idle fee
+ * - Offline: Mất kết nối
+ * - Maintenance: Bảo trì
+ * 
+ * Dependencies:
+ * - reservationService: Validate và update reservations
+ * - Supabase: Database operations
+ * - chargingScheduler: Gọi detectAlmostDoneSessions() mỗi 1 phút
+ */
+
 import supabase from '../config/supabase.js';
 import reservationService from './reservationService.js';
 

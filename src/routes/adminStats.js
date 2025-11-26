@@ -1,3 +1,68 @@
+/**
+ * ===============================================================
+ * ADMIN STATISTICS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes cung cấp thống kê toàn hệ thống cho Admin
+ * 
+ * Endpoints:
+ * - GET /api/admin/stats - Lấy tất cả stats (revenue, top stations, alerts, activities)
+ * 
+ * Chức năng:
+ * - 💰 Revenue statistics (today, week, month, YTD)
+ * - 🏆 Top performing stations (theo revenue)
+ * - ⚠️ System alerts (bảo trì, lỗi, cảnh báo)
+ * - 📝 Recent activities (sessions, user actions)
+ * 
+ * Revenue calculation:
+ * - Sử dụng Vietnam timezone (UTC+7)
+ * - Periods:
+ *   * Today: Từ 00:00:00 hôm nay (Vietnam time)
+ *   * This week: 7 ngày gần đây
+ *   * This month: 30 ngày gần đây
+ *   * Year to date: Từ 01/01 năm nay
+ * - Bao gồm:
+ *   * Completed sessions (status='Completed')
+ *   * Active sessions có cost > 0 (đang tạo revenue)
+ * - Filter theo start_time (không phải end_time)
+ * 
+ * Top Stations:
+ * - Sắp xếp theo revenue (cao → thấp)
+ * - Tính revenue từ sessions của từng station
+ * - Hiển thị: Name, location, revenue, period
+ * 
+ * System Alerts:
+ * - Maintenance alerts: Điểm sạc cần bảo trì
+ * - Offline points: Điểm sạc mất kết nối
+ * - Low utilization: Trạm sử dụng thấp
+ * - Mỗi alert có: type (warning/error/info), title, message, timestamp
+ * 
+ * Recent Activities:
+ * - Latest 10 sessions hoàn thành
+ * - Format: User + action + timestamp
+ * - Example: "John Doe completed charging session at Station ABC"
+ * - Type: success (completed), info (started), warning (cancelled)
+ * 
+ * Response format:
+ * ```json
+ * {
+ *   "success": true,
+ *   "revenue": { today, thisWeek, thisMonth, yearToDate, trend },
+ *   "topStations": [{ id, name, location, revenue, period }],
+ *   "systemAlerts": [{ type, title, message, timestamp }],
+ *   "recentActivities": [{ user, action, timestamp, type }]
+ * }
+ * ```
+ * 
+ * Timezone handling:
+ * - Backend tính toán theo Vietnam time (UTC+7)
+ * - Convert dates: localNow = utcNow + 7 hours
+ * - Log ra console để debug
+ * 
+ * Dependencies:
+ * - Supabase Admin: Query charging_sessions, stations, charging_points
+ * - Date calculations: Vietnam timezone offset
+ */
+
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 

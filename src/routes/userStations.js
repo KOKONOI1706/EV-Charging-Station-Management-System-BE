@@ -1,3 +1,58 @@
+/**
+ * ===============================================================
+ * USER STATIONS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes quản lý assignment của Staff đến Stations
+ * 
+ * Endpoints:
+ * - GET /api/user-stations/:userId - Lấy station được assign cho user
+ * - PUT /api/user-stations/:userId - Cập nhật station assignment
+ * - GET /api/user-stations/staff/:stationId - Lấy danh sách staff của station
+ * 
+ * Use cases:
+ * 1. Staff login → Gọi getUserStation(staffId) → Hiển thị dashboard của station đó
+ * 2. Admin assign staff → Gọi updateUserStation(staffId, stationId)
+ * 3. Admin xem staff list → Gọi getStationStaff(stationId)
+ * 
+ * Database:
+ * - Table: users
+ * - Field: station_id (UUID, nullable)
+ * - Relation: users.station_id → stations.id
+ * 
+ * GET /api/user-stations/:userId:
+ * - Query: users table join stations (LEFT JOIN)
+ * - Select: user info + station info (null nếu chưa assign)
+ * - Return: { userId, name, email, roleId, stationId, station: {...} }
+ * 
+ * PUT /api/user-stations/:userId:
+ * - Body: { stationId: "uuid" hoặc null }
+ * - Validate: stationId tồn tại trong stations table
+ * - Update: users.station_id = stationId
+ * - Return: Updated user với station info
+ * 
+ * GET /api/user-stations/staff/:stationId:
+ * - Query: users WHERE station_id = stationId AND role_id = 2 (staff)
+ * - Order by: name ASC
+ * - Return: { stationId, staffCount, staff: [...] }
+ * 
+ * Assignment flow:
+ * 1. Admin vào User Management
+ * 2. Chọn staff user
+ * 3. Click "Assign to Station"
+ * 4. Chọn station từ dropdown
+ * 5. Frontend gọi PUT /api/user-stations/:userId với { stationId }
+ * 6. Backend update users.station_id
+ * 7. Staff login lại → Chỉ thấy data của station đó
+ * 
+ * Unassign:
+ * - Gọi PUT với { stationId: null }
+ * - users.station_id = null
+ * - Staff không còn bị limit theo station
+ * 
+ * Dependencies:
+ * - Supabase Admin: Query users, stations
+ */
+
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 
