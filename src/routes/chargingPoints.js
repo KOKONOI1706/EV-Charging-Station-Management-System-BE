@@ -1,3 +1,47 @@
+/**
+ * ===============================================================
+ * CHARGING POINTS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes quản lý điểm sạc (charging points)
+ * 
+ * Endpoints:
+ * - GET /api/charging-points - Lấy tất cả charging points
+ * - GET /api/charging-points/:id - Lấy chi tiết 1 charging point
+ * - POST /api/charging-points - Tạo charging point mới (Admin)
+ * - PUT /api/charging-points/:id - Cập nhật charging point (Staff/Admin)
+ * - DELETE /api/charging-points/:id - Xóa charging point (Admin)
+ * - PUT /api/charging-points/:id/status - Cập nhật trạng thái (Staff/Admin)
+ * 
+ * Query params (GET /):
+ * - station_id: Filter theo station
+ * - status: Filter theo status (Available, Occupied, Offline, Maintenance)
+ * 
+ * Charging Point schema:
+ * - point_id: BIGINT (primary key)
+ * - station_id: UUID (foreign key → stations)
+ * - name: VARCHAR (tên điểm sạc, vd: "Point A1")
+ * - power_kw: DECIMAL (công suất, vd: 50, 150, 350)
+ * - connector_type_id: INT (foreign key → connector_types)
+ * - status: VARCHAR (Available, Occupied, Offline, Maintenance, AlmostDone)
+ * - idle_fee_per_min: DECIMAL (phí idle khi xe đã đầy pin)
+ * - location_x, location_y: INT (tọa độ trong layout editor)
+ * 
+ * Status meanings:
+ * - Available: Sẵn sàng sử dụng
+ * - Occupied: Đang có xe sạc
+ * - AlmostDone: Gần đầy pin (>95%), cảnh báo idle fee
+ * - Offline: Mất kết nối/lỗi
+ * - Maintenance: Đang bảo trì
+ * 
+ * Response joins:
+ * - stations: id, name, address
+ * - connector_types: connector_type_id, code, name
+ * 
+ * Dependencies:
+ * - Supabase: Database operations
+ * - Middleware: requireAuth, requireAdmin/Staff
+ */
+
 import express from 'express';
 import supabase from '../supabase/client.js';
 

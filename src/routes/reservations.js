@@ -1,3 +1,57 @@
+/**
+ * ===============================================================
+ * RESERVATIONS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes quản lý đặt chỗ với auto-expiry service
+ * 
+ * Endpoints:
+ * - POST /api/reservations - Tạo reservation mới (15 phút validity)
+ * - GET /api/reservations/active - Lấy active reservation của user
+ * - GET /api/reservations/user/:userId - Lấy lịch sử reservations
+ * - DELETE /api/reservations/:id - Hủy reservation
+ * - POST /api/reservations/:id/checkin - Check-in reservation
+ * 
+ * Reservation flow:
+ * 1. POST /reservations → reservationService.createReservation()
+ *    - Kiểm tra user chưa có reservation active
+ *    - Kiểm tra charging point available
+ *    - Tạo booking record với expire_time = now + 15 phút
+ *    - Scheduler tự động expire sau 15 phút
+ * 
+ * 2. GET /reservations/active?userId=X
+ *    - Lấy reservation đang active (chưa expire, chưa check-in)
+ *    - Return reservation với remainingSeconds
+ * 
+ * 3. DELETE /reservations/:id?userId=X
+ *    - Hủy reservation
+ *    - Cập nhật status = Cancelled
+ *    - Release charging point
+ * 
+ * 4. POST /reservations/:id/checkin
+ *    - User check-in tại trạm
+ *    - Cập nhật status = Active
+ *    - Cho phép bắt đầu charging session
+ * 
+ * Auto-expiry:
+ * - chargingScheduler chạy mỗi 30s
+ * - Tìm reservations có expire_time < now
+ * - Cập nhật status = Expired
+ * - Release charging points
+ * 
+ * Schema (bookings table used for reservations):
+ * - booking_id: BIGINT (primary key)
+ * - user_id: BIGINT (foreign key → users)
+ * - point_id: BIGINT (foreign key → charging_points)
+ * - start_time: TIMESTAMP (thời gian đặt)
+ * - expire_time: TIMESTAMP (hết hạn sau 15 phút)
+ * - status: VARCHAR (Confirmed, Active, Expired, Cancelled)
+ * 
+ * Dependencies:
+ * - reservationService: Logic tạo/hủy/expire reservations
+ * - chargingScheduler: Auto-expire old reservations
+ * - Supabase: Database operations
+ */
+
 import express from 'express';
 import reservationService from '../services/reservationService.js';
 import supabase from '../config/supabase.js';

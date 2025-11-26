@@ -1,3 +1,82 @@
+/**
+ * ===============================================================
+ * ANALYTICS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes cung cấp analytics tổng quan cho hệ thống
+ * 
+ * Endpoints:
+ * - GET /api/analytics/overview - Tổng quan analytics
+ * 
+ * Chức năng:
+ * - 📊 Summary statistics (stations, reservations, revenue)
+ * - 📅 Support multiple time periods (7d, 30d, 90d, 1y)
+ * - 💰 Revenue calculation
+ * - ⏱️ Average session duration
+ * - 📊 Completion rate
+ * 
+ * Query params:
+ * - period: Thời gian phân tích
+ *   * '7d': 7 ngày gần đây
+ *   * '30d': 30 ngày (mặc định)
+ *   * '90d': 90 ngày
+ *   * '1y': 1 năm
+ * 
+ * Summary statistics:
+ * 
+ * 1. totalStations:
+ *    - Tổng số trạm trong hệ thống
+ * 
+ * 2. activeStations:
+ *    - Trạm có status='active'
+ * 
+ * 3. totalReservations:
+ *    - Tổng reservations trong period
+ * 
+ * 4. completedReservations:
+ *    - Reservations status='completed'
+ * 
+ * 5. totalRevenue:
+ *    - Sum amount của payments status='completed'
+ *    - Trong period
+ * 
+ * 6. averageSessionDuration:
+ *    - Trung bình (actual_end_time - actual_start_time)
+ *    - Chỉ tính completed reservations
+ *    - Đơn vị: Phút
+ * 
+ * Date range calculation:
+ * - endDate = now
+ * - startDate = endDate - period
+ * - Filter: created_at >= startDate AND created_at <= endDate
+ * 
+ * Response format:
+ * ```json
+ * {
+ *   "success": true,
+ *   "data": {
+ *     "period": "30d",
+ *     "summary": {
+ *       "totalStations": 10,
+ *       "activeStations": 8,
+ *       "totalReservations": 150,
+ *       "completedReservations": 120,
+ *       "totalRevenue": 5000000,
+ *       "averageSessionDuration": 45.5
+ *     }
+ *   }
+ * }
+ * ```
+ * 
+ * Use cases:
+ * - Admin dashboard: Overview của toàn hệ thống
+ * - Reports: Xuất báo cáo theo tháng/quý
+ * - Business intelligence: Phân tích xu hướng
+ * 
+ * Dependencies:
+ * - Supabase: Query stations, reservations, payments
+ * - Date calculations: Period-based filtering
+ */
+
 import express from 'express';
 import supabase from '../supabase/client.js';
 

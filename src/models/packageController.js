@@ -1,3 +1,48 @@
+/**
+ * ===============================================================
+ * PACKAGE CONTROLLER (BACKEND)
+ * ===============================================================
+ * Controller xử lý requests cho service packages
+ * 
+ * Methods:
+ * 
+ * 1. getAll(req, res):
+ *    - PackageService.getAll()
+ *    - Return: Array packages (JSON)
+ *    - 500 nếu lỗi
+ * 
+ * 2. getById(req, res):
+ *    - PackageService.getById(id)
+ *    - Return: Single package (JSON)
+ *    - 404 nếu không tìm thấy
+ *    - 500 nếu lỗi
+ * 
+ * 3. create(req, res):
+ *    - Body: Package data
+ *    - PackageService.create(body)
+ *    - Return: Created package (201)
+ *    - 400 nếu validation lỗi
+ * 
+ * 4. update(req, res):
+ *    - Body: Updated fields
+ *    - PackageService.update(id, body)
+ *    - Return: Updated package (JSON)
+ *    - 400 nếu validation lỗi
+ * 
+ * 5. delete(req, res):
+ *    - PackageService.delete(id)
+ *    - Return: Deleted package (JSON)
+ *    - 500 nếu lỗi
+ * 
+ * Error handling:
+ * - Catch errors từ service layer
+ * - Return appropriate status codes
+ * - Send error message trong response
+ * 
+ * Dependencies:
+ * - PackageService: Business logic + DB operations
+ */
+
 import { PackageService } from "../services/packageService.js";
 
 export const PackageController = {

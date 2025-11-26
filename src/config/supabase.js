@@ -1,3 +1,55 @@
+/*
+========================================
+SUPABASE CONFIG - Cấu hình Supabase Client
+========================================
+
+Mô tả:
+File config tạo Supabase clients cho backend (Node.js).
+Tự động tìm file .env ở nhiều đường dẫn khác nhau.
+
+Chức năng chính:
+• Tìm và load file .env từ nhiều vị trí có thể
+• Tạo 2 Supabase clients:
+  1. supabase: Client thông thường với ANON_KEY (có Row Level Security - RLS)
+  2. supabaseAdmin: Admin client với SERVICE_ROLE_KEY (bypass RLS)
+• Validate environment variables
+• Export ra các clients để dùng trong toàn bộ backend
+
+Đường dẫn tìm .env (theo thứ tự):
+1. src/config/../../.env (thư mục gốc BE)
+2. process.cwd()/.env (thư mục hiện tại khi chạy)
+3. ../../EV-Charging-Station-Management-System-BE/.env (từ workspace root)
+
+Environment variables cần:
+- SUPABASE_URL: URL của Supabase project
+- SUPABASE_ANON_KEY: Public anon key (cho client thông thường)
+- SUPABASE_SERVICE_ROLE_KEY: Service role key (cho admin client)
+
+Clients:
+- supabase (export default): Dùng cho các API routes thông thường
+  + Tuân thủ Row Level Security (RLS)
+  + Chỉ truy cập data được phép theo policies
+  
+- supabaseAdmin (export named): Dùng cho server-side operations
+  + Bypass Row Level Security
+  + Full quyền truy cập database
+  + Dùng cho: seeding, migrations, admin tasks
+
+Error handling:
+- Throw error nếu thiếu SUPABASE_URL hoặc SUPABASE_ANON_KEY
+- Console.warn nếu không tìm thấy .env nhưng vẫn thử default dotenv.config()
+
+ESM compatibility:
+- Dùng fileURLToPath để convert import.meta.url thành __filename
+- Tính __dirname từ __filename
+- fs.existsSync để check file .env tồn tại
+
+Dependencies:
+- @supabase/supabase-js: Supabase client library
+- dotenv: Load environment variables
+- path, fs: File system operations
+*/
+
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';

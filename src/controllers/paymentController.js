@@ -1,3 +1,60 @@
+/**
+ * ===============================================================
+ * PAYMENT CONTROLLER (BACKEND)
+ * ===============================================================
+ * Controller xử lý thanh toán qua MoMo và VNPay
+ * 
+ * Chức năng:
+ * - 💳 MoMo Integration: Tạo payment URL, nhận IPN webhook, check status
+ * - 💵 VNPay Integration: Tạo payment URL, nhận return callback
+ * - 📄 Tạo invoice sau khi thanh toán thành công
+ * - 🔄 Cập nhật payment status, session status
+ * - ✅ Manual complete workaround (localhost testing)
+ * 
+ * MoMo API Docs: https://developers.momo.vn/#/docs/en/aiov2/?id=payment-method
+ * 
+ * MoMo Flow:
+ * 1. Frontend gọi POST /payments/momo/create với { session_id, amount }
+ * 2. Backend:
+ *    - Tạo orderId = "ORDER_{sessionId}_{timestamp}"
+ *    - Tạo payment record với status=Pending
+ *    - Gọi MoMo API /v2/gateway/api/create
+ *    - Nhận payUrl từ MoMo
+ * 3. Frontend redirect user đến payUrl
+ * 4. User thanh toán trên MoMo app/website
+ * 5. MoMo gửi IPN webhook đến /payments/momo/ipn
+ * 6. Backend verify signature, cập nhật payment + session + tạo invoice
+ * 7. Frontend poll /payments/momo/status/:orderId để kiểm tra kết quả
+ * 
+ * Signature verification:
+ * - MoMo gửi signature trong IPN request
+ * - Backend tính signature từ raw data + secret key
+ * - So sánh để verify tính hợp lệ
+ * 
+ * Environment variables:
+ * - MOMO_PARTNER_CODE: Partner code từ MoMo
+ * - MOMO_ACCESS_KEY: Access key
+ * - MOMO_SECRET_KEY: Secret key để sign requests
+ * - MOMO_ENDPOINT: Test hoặc production endpoint
+ * - MOMO_REDIRECT_URL: URL redirect sau thanh toán
+ * - MOMO_IPN_URL: URL nhận IPN webhook
+ * 
+ * Payment statuses:
+ * - Pending: Chờ thanh toán
+ * - Success: Thanh toán thành công
+ * - Failed: Thanh toán thất bại
+ * 
+ * Invoice creation:
+ * - Tự động tạo invoice sau khi payment success
+ * - invoice.status = Paid
+ * - invoice.total_amount = payment.amount
+ * 
+ * Dependencies:
+ * - crypto: HMAC SHA256 signature
+ * - https: Call MoMo API
+ * - Supabase: Database operations
+ */
+
 import crypto from 'crypto';
 import https from 'https';
 import supabase from '../supabase/client.js';
