@@ -1,3 +1,85 @@
+/**
+ * ===============================================================
+ * KEY-VALUE STORE SERVICE (DỊCH VỤ LƯU TRỮ KEY-VALUE)
+ * ===============================================================
+ * Service cung cấp key-value storage interface qua Supabase
+ * 
+ * Chức năng:
+ * - 🔑 Set/Get/Delete key-value pairs
+ * - 📦 Batch operations (mset, mget, mdel)
+ * - 🔍 Search by prefix
+ * - 💾 Persistent storage (Supabase table)
+ * 
+ * Table: kv_store_c4dbb6c1
+ * - key: String (primary key)
+ * - value: Any (JSON-serializable)
+ * 
+ * Methods:
+ * 
+ * 1. set(key, value)
+ *    - Upsert key-value vào table
+ *    - Nếu key đã tồn tại → update value
+ *    - Nếu chưa tồn tại → insert
+ * 
+ * 2. get(key): value | undefined
+ *    - SELECT value WHERE key = key
+ *    - Return value hoặc undefined
+ * 
+ * 3. del(key)
+ *    - DELETE WHERE key = key
+ * 
+ * 4. mset(keys[], values[])
+ *    - Set nhiều key-value cùng lúc
+ *    - Tạo array records [{key, value}, ...]
+ *    - Upsert tất cả
+ * 
+ * 5. mget(keys[]): values[]
+ *    - Get nhiều keys cùng lúc
+ *    - SELECT WHERE key IN (keys)
+ *    - Return array values (null nếu không tìm thấy)
+ * 
+ * 6. mdel(keys[])
+ *    - Delete nhiều keys cùng lúc
+ *    - DELETE WHERE key IN (keys)
+ * 
+ * 7. getByPrefix(prefix): values[]
+ *    - Search keys bắt đầu bằng prefix
+ *    - VD: prefix='session:' → Lấy 'session:123', 'session:456'
+ *    - SELECT WHERE key LIKE 'prefix%'
+ *    - Return array values
+ * 
+ * Use cases:
+ * - Cache data: set('user:123', userData)
+ * - Session storage: set('session:abc', sessionData)
+ * - Feature flags: set('feature:newUI', true)
+ * - Temporary data: set('temp:upload123', fileInfo)
+ * 
+ * Example:
+ * ```javascript
+ * // Set
+ * await set('user:123', { name: 'John', email: 'john@example.com' });
+ * 
+ * // Get
+ * const user = await get('user:123');
+ * 
+ * // Batch set
+ * await mset(['key1', 'key2'], ['value1', 'value2']);
+ * 
+ * // Search
+ * const allUsers = await getByPrefix('user:');
+ * 
+ * // Delete
+ * await del('user:123');
+ * ```
+ * 
+ * Error handling:
+ * - All methods catch errors và log ra console
+ * - Throw error để caller xử lý
+ * 
+ * Dependencies:
+ * - Supabase client: Query kv_store_c4dbb6c1 table
+ */
+
 import { supabase } from './client.js';
 
 /**

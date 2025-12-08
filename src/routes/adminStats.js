@@ -1,3 +1,68 @@
+/**
+ * ===============================================================
+ * ADMIN STATISTICS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes cung cấp thống kê toàn hệ thống cho Admin
+ * 
+ * Endpoints:
+ * - GET /api/admin/stats - Lấy tất cả stats (revenue, top stations, alerts, activities)
+ * 
+ * Chức năng:
+ * - 💰 Revenue statistics (today, week, month, YTD)
+ * - 🏆 Top performing stations (theo revenue)
+ * - ⚠️ System alerts (bảo trì, lỗi, cảnh báo)
+ * - 📝 Recent activities (sessions, user actions)
+ * 
+ * Revenue calculation:
+ * - Sử dụng Vietnam timezone (UTC+7)
+ * - Periods:
+ *   * Today: Từ 00:00:00 hôm nay (Vietnam time)
+ *   * This week: 7 ngày gần đây
+ *   * This month: 30 ngày gần đây
+ *   * Year to date: Từ 01/01 năm nay
+ * - Bao gồm:
+ *   * Completed sessions (status='Completed')
+ *   * Active sessions có cost > 0 (đang tạo revenue)
+ * - Filter theo start_time (không phải end_time)
+ * 
+ * Top Stations:
+ * - Sắp xếp theo revenue (cao → thấp)
+ * - Tính revenue từ sessions của từng station
+ * - Hiển thị: Name, location, revenue, period
+ * 
+ * System Alerts:
+ * - Maintenance alerts: Điểm sạc cần bảo trì
+ * - Offline points: Điểm sạc mất kết nối
+ * - Low utilization: Trạm sử dụng thấp
+ * - Mỗi alert có: type (warning/error/info), title, message, timestamp
+ * 
+ * Recent Activities:
+ * - Latest 10 sessions hoàn thành
+ * - Format: User + action + timestamp
+ * - Example: "John Doe completed charging session at Station ABC"
+ * - Type: success (completed), info (started), warning (cancelled)
+ * 
+ * Response format:
+ * ```json
+ * {
+ *   "success": true,
+ *   "revenue": { today, thisWeek, thisMonth, yearToDate, trend },
+ *   "topStations": [{ id, name, location, revenue, period }],
+ *   "systemAlerts": [{ type, title, message, timestamp }],
+ *   "recentActivities": [{ user, action, timestamp, type }]
+ * }
+ * ```
+ * 
+ * Timezone handling:
+ * - Backend tính toán theo Vietnam time (UTC+7)
+ * - Convert dates: localNow = utcNow + 7 hours
+ * - Log ra console để debug
+ * 
+ * Dependencies:
+ * - Supabase Admin: Query charging_sessions, stations, charging_points
+ * - Date calculations: Vietnam timezone offset
+ */
+
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 
@@ -37,24 +102,27 @@ router.get('/stats', async (req, res) => {
 
 // Helper function to get revenue statistics
 async function getRevenueStats() {
+  // Use Vietnam timezone (UTC+7)
   const now = new Date();
+  const vietnamOffset = 7 * 60; // UTC+7 in minutes
+  const localNow = new Date(now.getTime() + vietnamOffset * 60 * 1000);
   
-  // Last 30 days (instead of "this month")
-  const last30Days = new Date(now);
-  last30Days.setDate(now.getDate() - 30);
-  last30Days.setHours(0, 0, 0, 0);
+  // Last 30 days
+  const last30Days = new Date(localNow);
+  last30Days.setDate(localNow.getDate() - 30);
+  last30Days.setUTCHours(0, 0, 0, 0);
   
-  // Today = from 00:00:00 today
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
+  // Today = from 00:00:00 today (Vietnam time)
+  const todayStart = new Date(localNow);
+  todayStart.setUTCHours(0, 0, 0, 0);
   
-  // Week start (Sunday)
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - now.getDay());
-  weekStart.setHours(0, 0, 0, 0);
+  // Week start = 7 days ago (but label will still say "this week")
+  const weekStart = new Date(localNow);
+  weekStart.setDate(localNow.getDate() - 7);
+  weekStart.setUTCHours(0, 0, 0, 0);
   
   // Year start
-  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const yearStart = new Date(Date.UTC(localNow.getFullYear(), 0, 1));
 
   console.log('\n=== REVENUE CALCULATION PERIODS ===');
   console.log('  Today start:', todayStart.toISOString());
@@ -62,15 +130,23 @@ async function getRevenueStats() {
   console.log('  Last 30 days:', last30Days.toISOString());
   console.log('  Year start:', yearStart.toISOString());
 
-  // Get all completed sessions from year start to now
-  const { data: sessions, error } = await supabaseAdmin
+  // Get all completed sessions from year start to now (based on start_time not end_time)
+  const { data: completedSessions, error: completedError } = await supabaseAdmin
     .from('charging_sessions')
-    .select('cost, end_time, start_time, session_id')
+    .select('cost, end_time, start_time, session_id, status')
     .eq('status', 'Completed')
-    .gte('end_time', yearStart.toISOString());
+    .gte('start_time', yearStart.toISOString());
 
-  if (error) {
-    console.error('❌ Error fetching revenue sessions:', error);
+  // Also get active sessions that have cost > 0 (ongoing but already generating revenue)
+  const { data: activeSessions, error: activeError } = await supabaseAdmin
+    .from('charging_sessions')
+    .select('cost, end_time, start_time, session_id, status')
+    .eq('status', 'Active')
+    .gte('start_time', yearStart.toISOString())
+    .gt('cost', 0);
+
+  if (completedError || activeError) {
+    console.error('❌ Error fetching revenue sessions:', completedError || activeError);
     return {
       today: 0,
       thisWeek: 0,
@@ -80,12 +156,15 @@ async function getRevenueStats() {
     };
   }
 
-  console.log(`\n📊 Total completed sessions fetched: ${sessions?.length || 0}`);
+  // Combine completed and active sessions
+  const sessions = [...(completedSessions || []), ...(activeSessions || [])];
+
+  console.log(`\n📊 Total sessions fetched: ${sessions?.length || 0} (${completedSessions?.length || 0} completed + ${activeSessions?.length || 0} active)`);
   
-  // Filter sessions by period
-  const todaySessions = sessions?.filter(s => new Date(s.end_time) >= todayStart) || [];
-  const weekSessions = sessions?.filter(s => new Date(s.end_time) >= weekStart) || [];
-  const last30DaysSessions = sessions?.filter(s => new Date(s.end_time) >= last30Days) || [];
+  // Filter sessions by period (use start_time for filtering)
+  const todaySessions = sessions?.filter(s => new Date(s.start_time) >= todayStart) || [];
+  const weekSessions = sessions?.filter(s => new Date(s.start_time) >= weekStart) || [];
+  const last30DaysSessions = sessions?.filter(s => new Date(s.start_time) >= last30Days) || [];
   const yearSessions = sessions || [];
 
   console.log('📈 Sessions by period:');
@@ -292,7 +371,7 @@ async function getRecentActivities(limit = 5) {
     // Step 3: Get user details separately
     const { data: users, error: usersError } = await supabaseAdmin
       .from('users')
-      .select('user_id, full_name')
+      .select('user_id, name')
       .in('user_id', userIds);
 
     if (usersError) {
@@ -304,7 +383,7 @@ async function getRecentActivities(limit = 5) {
       const user = users?.find(u => u.user_id === session.user_id);
       return {
         id: session.session_id.toString(),
-        user: user?.full_name || 'Unknown User',
+        user: user?.name || 'Unknown User',
         action: session.status === 'Completed' 
           ? `Hoàn thành phiên sạc - ${Math.round((new Date(session.end_time) - new Date(session.start_time)) / 60000)} phút`
           : session.status === 'Active'

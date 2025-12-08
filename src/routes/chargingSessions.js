@@ -1,7 +1,51 @@
+/**
+ * ========================================
+ * CHARGING SESSIONS ROUTES
+ * ========================================
+ * API endpoints để quản lý phiên sạc xe điện
+ * 
+ * Chức năng chính:
+ * - Bắt đầu phiên sạc (từ reservation hoặc direct)
+ * - Dừng phiên sạc và tính toán chi phí
+ * - Lấy danh sách phiên sạc (có filter)
+ * - Lấy phiên đang active của user
+ * - Cập nhật real-time meter reading và estimated cost
+ * - Quản lý % pin, thời gian ước tính
+ * - Tạo hóa đơn (invoice) cho phiên đã hoàn thành
+ * 
+ * Cấu trúc phiên sạc:
+ * 1. Active: Đang sạc điện
+ * 2. Completed: Đã hoàn thành và thanh toán
+ * 3. Error: Gặp lỗi trong quá trình sạc
+ * 
+ * Các trường dữ liệu quan trọng:
+ * - session_id: ID phiên
+ * - user_id, point_id, vehicle_id: Liên kết user, điểm sạc, xe
+ * - meter_start, meter_end: Số công tơ bắt đầu/kết thúc
+ * - current_meter: Số công tơ hiện tại (real-time)
+ * - initial_battery_percent, target_battery_percent: Mức pin
+ * - battery_progress: Tiến độ sạc (%)
+ * - estimated_cost: Chi phí ước tính (VND)
+ * - energy_consumed_kwh: Điện năng tiêu thụ (kWh)
+ * - charging_rate_kw: Tốc độ sạc hiện tại (kW)
+ * - estimated_minutes_remaining: Thời gian còn lại ước tính
+ * 
+ * Tích hợp:
+ * - sessionManagementService: Xử lý logic business
+ * - Supabase: Database và real-time updates
+ * - Invoice generation: Tạo hóa đơn sau khi hoàn thành
+ */
+
+// Import Express Router
 import express from 'express';
+
+// Import Supabase client
 import supabase from '../supabase/client.js';
+
+// Import session management service
 import sessionManagementService from '../services/sessionManagementService.js';
 
+// Tạo router instance
 const router = express.Router();
 
 /**

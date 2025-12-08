@@ -1,3 +1,73 @@
+/**
+ * ===============================================================
+ * RESERVATION SERVICE (BACKEND)
+ * ===============================================================
+ * Service quản lý reservations với auto-expiry
+ * 
+ * Chức năng:
+ * - 🎫 Tạo reservation (giữ chỗ 15 phút)
+ * - ⏰ Auto-expire reservations cũ (chạy bởi scheduler)
+ * - ✅ Validate reservation trước khi start session
+ * - ❌ Cancel reservation
+ * - 🔄 Cập nhật trạng thái charging point
+ * 
+ * Reservation Status Flow:
+ * - Confirmed: Vừa tạo, đang giữ chỗ
+ * - Active: User bắt đầu sạc (completeReservation)
+ * - Expired: Hết 15 phút chưa check-in
+ * - Cancelled: User hủy
+ * - Completed: Session hoàn thành
+ * 
+ * Methods:
+ * 
+ * 1. createReservation({ userId, pointId, durationMinutes })
+ *    - Kiểm tra charging point Available
+ *    - Kiểm tra user không có reservation/session active khác
+ *    - Tạo booking record với expire_time = now + 15 phút
+ *    - Return booking_id, expire_time
+ * 
+ * 2. expireOldReservations()
+ *    - Tìm bookings có expire_time < now và status=Confirmed
+ *    - Cập nhật status = Expired
+ *    - Release charging points (không cập nhật - vì không lock point)
+ *    - Return { expired: count }
+ * 
+ * 3. validateReservation(reservationId, userId)
+ *    - Kiểm tra reservation tồn tại
+ *    - Kiểm tra user sở hữu reservation
+ *    - Kiểm tra chưa expire
+ *    - Kiểm tra status = Confirmed
+ *    - Return { valid: boolean, reason: string }
+ * 
+ * 4. cancelReservation(reservationId, userId)
+ *    - Validate ownership
+ *    - Cập nhật status = Cancelled
+ *    - Return success/error
+ * 
+ * 5. getActiveReservation(userId)
+ *    - Lấy reservation status=Confirmed chưa expire
+ *    - Tính remainingSeconds = expire_time - now
+ *    - Return reservation + remainingSeconds
+ * 
+ * Database schema (bookings table):
+ * - booking_id: BIGINT
+ * - user_id: BIGINT
+ * - point_id: BIGINT
+ * - station_id: UUID
+ * - start_time: TIMESTAMP (thời điểm tạo)
+ * - expire_time: TIMESTAMP (start_time + 15 phút)
+ * - status: VARCHAR (Confirmed, Active, Expired, Cancelled)
+ * 
+ * Timezone handling:
+ * - Lưu ISO strings trong database
+ * - Tính toán thời gian bằng JavaScript Date
+ * - Log ra console để debug timezone issues
+ * 
+ * Dependencies:
+ * - Supabase: Database operations
+ * - chargingScheduler: Gọi expireOldReservations() mỗi 30s
+ */
+
 import supabase from '../supabase/client.js';
 
 /**

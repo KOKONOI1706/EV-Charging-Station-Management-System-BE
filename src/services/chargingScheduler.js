@@ -1,3 +1,60 @@
+/**
+ * ===============================================================
+ * CHARGING SCHEDULER SERVICE (BACKEND)
+ * ===============================================================
+ * Background service xử lý các tác vụ định kỳ
+ * 
+ * Chức năng:
+ * - ⏰ Auto-expire reservations cũ (mỗi 30s)
+ * - 🟡 Detect sessions gần đầy pin → AlmostDone status (mỗi 1 phút)
+ * - 🧹 Clean up stale data
+ * - 📊 Health check và monitoring
+ * 
+ * Schedulers:
+ * 
+ * 1. Reservation Expiry (30 seconds interval)
+ *    - Gọi reservationService.expireOldReservations()
+ *    - Tìm reservations có expire_time < now
+ *    - Cập nhật status = Expired
+ *    - Release charging points
+ *    - Log số reservations đã expire
+ * 
+ * 2. AlmostDone Detection (1 minute interval)
+ *    - Gọi sessionManagementService.detectAlmostDoneSessions()
+ *    - Tìm sessions có battery >= 95%
+ *    - Cập nhật charging point status = AlmostDone
+ *    - Gửi notification cho user (cảnh báo idle fee)
+ *    - Log số points đã update
+ * 
+ * Lifecycle:
+ * - start(): Bắt đầu tất cả schedulers
+ * - stop(): Dừng tất cả schedulers
+ * - runImmediately(): Chạy 1 lần ngay lập tức (testing)
+ * 
+ * Usage:
+ * ```javascript
+ * // In server.js
+ * import chargingScheduler from './services/chargingScheduler.js';
+ * 
+ * // Start when server starts
+ * chargingScheduler.start();
+ * 
+ * // Stop when server shuts down
+ * process.on('SIGTERM', () => {
+ *   chargingScheduler.stop();
+ * });
+ * ```
+ * 
+ * Error handling:
+ * - Mỗi scheduler có try-catch riêng
+ * - Lỗi không làm crash server
+ * - Log errors để monitoring
+ * 
+ * Dependencies:
+ * - reservationService: Expire reservations
+ * - sessionManagementService: Detect AlmostDone sessions
+ */
+
 import reservationService from './reservationService.js';
 import sessionManagementService from './sessionManagementService.js';
 

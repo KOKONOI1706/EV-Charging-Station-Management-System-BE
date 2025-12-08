@@ -1,3 +1,93 @@
+/**
+ * ===============================================================
+ * SEED STATIONS SCRIPT (SCRIPT KHỞI TẠO DỮ LIỆU TRẠM)
+ * ===============================================================
+ * Script khởi tạo dữ liệu mẫu cho stations table trong Supabase
+ * 
+ * Chức năng:
+ * - 🌱 Seed 6 trạm sạc mẫu tại TP.HCM
+ * - ✅ Kiểm tra table tồn tại trước khi seed
+ * - 📍 Dữ liệu realistic với tọa độ thật
+ * - 🏢 Đa dạng locations (sân bay, trung tâm, highway, etc.)
+ * 
+ * Stations data (6 trạm):
+ * 
+ * 1. Central Mall Charging Hub:
+ *    - Location: Nguyễn Huệ, Quận 1
+ *    - 8 spots (6 available)
+ *    - 150kW, CCS/CHAdeMO/Type2
+ *    - Amenities: WiFi, Restroom, Cafe, Shopping
+ *    - Rating: 4.8/5
+ * 
+ * 2. Airport Express Station:
+ *    - Location: Tân Sơn Nhất Airport
+ *    - 12 spots (9 available)
+ *    - 350kW ultra-fast
+ *    - Amenities: WiFi, Lounge, Duty Free
+ *    - Rating: 4.9/5
+ * 
+ * 3. Tech Park Station:
+ *    - Location: Quang Trung Software City, Q12
+ *    - 6 spots (4 available)
+ *    - 150kW, CCS/Type2
+ *    - Amenities: WiFi, Parking, Cafe
+ *    - Operating: 6AM-10PM
+ * 
+ * 4. University Hub:
+ *    - Location: Linh Trung, Thủ Đức
+ *    - 10 spots (7 available)
+ *    - 150kW
+ *    - Amenities: Study Area, Food Court
+ *    - Rating: 4.7/5
+ * 
+ * 5. Highway Service Center:
+ *    - Location: QL1A, Bình Chánh
+ *    - 4 spots (3 available)
+ *    - 150kW
+ *    - Amenities: Restroom, Convenience Store
+ *    - 24/7
+ * 
+ * 6. Landmark 81 Premium:
+ *    - Location: Điện Biên Phủ, Bình Thạnh
+ *    - 15 spots (11 available)
+ *    - 350kW ultra-fast
+ *    - CCS/Tesla/CHAdeMO
+ *    - Amenities: Valet, Lounge, Fine Dining
+ *    - Rating: 4.9/5
+ * 
+ * Fields:
+ * - name, address, city, state, zip_code
+ * - lat, lng (coordinates)
+ * - total_spots, available_spots
+ * - power_kw, connector_type
+ * - price_per_kwh (VND)
+ * - rating (1-5)
+ * - amenities (array)
+ * - operating_hours, phone, network, status
+ * 
+ * Process:
+ * 1. Load env variables (.env file)
+ * 2. Create Supabase client (ANON_KEY)
+ * 3. Check stations table exists (SELECT limit 1)
+ * 4. Insert 6 stations
+ * 5. Log results
+ * 
+ * Error handling:
+ * - Missing env vars → Exit with instructions
+ * - Table not exists → Print schema guide
+ * - Insert error → Log error + exit
+ * 
+ * Usage:
+ * ```bash
+ * node seedStations.js
+ * ```
+ * 
+ * Dependencies:
+ * - @supabase/supabase-js
+ * - dotenv
+ * - Supabase project với stations table
+ */
+
 // Seed stations to Supabase
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';

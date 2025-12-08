@@ -1,3 +1,60 @@
+/**
+ * ===============================================================
+ * PAYMENT CONTROLLER (BACKEND)
+ * ===============================================================
+ * Controller xử lý thanh toán qua MoMo và VNPay
+ * 
+ * Chức năng:
+ * - 💳 MoMo Integration: Tạo payment URL, nhận IPN webhook, check status
+ * - 💵 VNPay Integration: Tạo payment URL, nhận return callback
+ * - 📄 Tạo invoice sau khi thanh toán thành công
+ * - 🔄 Cập nhật payment status, session status
+ * - ✅ Manual complete workaround (localhost testing)
+ * 
+ * MoMo API Docs: https://developers.momo.vn/#/docs/en/aiov2/?id=payment-method
+ * 
+ * MoMo Flow:
+ * 1. Frontend gọi POST /payments/momo/create với { session_id, amount }
+ * 2. Backend:
+ *    - Tạo orderId = "ORDER_{sessionId}_{timestamp}"
+ *    - Tạo payment record với status=Pending
+ *    - Gọi MoMo API /v2/gateway/api/create
+ *    - Nhận payUrl từ MoMo
+ * 3. Frontend redirect user đến payUrl
+ * 4. User thanh toán trên MoMo app/website
+ * 5. MoMo gửi IPN webhook đến /payments/momo/ipn
+ * 6. Backend verify signature, cập nhật payment + session + tạo invoice
+ * 7. Frontend poll /payments/momo/status/:orderId để kiểm tra kết quả
+ * 
+ * Signature verification:
+ * - MoMo gửi signature trong IPN request
+ * - Backend tính signature từ raw data + secret key
+ * - So sánh để verify tính hợp lệ
+ * 
+ * Environment variables:
+ * - MOMO_PARTNER_CODE: Partner code từ MoMo
+ * - MOMO_ACCESS_KEY: Access key
+ * - MOMO_SECRET_KEY: Secret key để sign requests
+ * - MOMO_ENDPOINT: Test hoặc production endpoint
+ * - MOMO_REDIRECT_URL: URL redirect sau thanh toán
+ * - MOMO_IPN_URL: URL nhận IPN webhook
+ * 
+ * Payment statuses:
+ * - Pending: Chờ thanh toán
+ * - Success: Thanh toán thành công
+ * - Failed: Thanh toán thất bại
+ * 
+ * Invoice creation:
+ * - Tự động tạo invoice sau khi payment success
+ * - invoice.status = Paid
+ * - invoice.total_amount = payment.amount
+ * 
+ * Dependencies:
+ * - crypto: HMAC SHA256 signature
+ * - https: Call MoMo API
+ * - Supabase: Database operations
+ */
+
 import crypto from 'crypto';
 import https from 'https';
 import supabase from '../supabase/client.js';
@@ -380,7 +437,7 @@ export const handleMoMoIPN = async (req, res) => {
     const { data: payment, error: paymentError } = await supabase
       .from('payments')
       .select('*')
-      .eq('order_id', orderId)
+      .eq('transaction_id', orderId)
       .single();
 
     if (paymentError || !payment) {
@@ -422,15 +479,88 @@ export const handleMoMoIPN = async (req, res) => {
       console.error('Failed to update payment:', updateError);
     }
 
-    // If payment successful, update charging session
-    if (resultCode === 0 && payment.session_id) {
-      await supabase
-        .from('charging_sessions')
-        .update({
-          payment_status: 'paid',
-          updated_at: new Date().toISOString()
-        })
-        .eq('session_id', payment.session_id);
+    // If payment successful, handle post-payment actions
+    if (resultCode === 0) {
+      // For session payments: update charging session
+      if (payment.session_id) {
+        await supabase
+          .from('charging_sessions')
+          .update({
+            payment_status: 'paid',
+            updated_at: new Date().toISOString()
+          })
+          .eq('session_id', payment.session_id);
+        
+        console.log('✅ Updated charging session:', payment.session_id);
+        
+        // 🔥 Auto-cleanup: Cancel any active/confirmed bookings for this user
+        console.log('🧹 Auto-cleaning up old reservations for user:', payment.user_id);
+        const { data: cancelledBookings, error: cancelError } = await supabase
+          .from('bookings')
+          .update({
+            status: 'Canceled',
+            canceled_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', payment.user_id)
+          .in('status', ['Active', 'Confirmed'])
+          .select('booking_id, point_id');
+        
+        if (cancelError) {
+          console.warn('⚠️ Failed to auto-cancel bookings:', cancelError);
+        } else if (cancelledBookings && cancelledBookings.length > 0) {
+          console.log(`✅ Auto-cancelled ${cancelledBookings.length} old booking(s)`);
+          
+          // Release charging points
+          const pointIds = cancelledBookings.map(b => b.point_id).filter(Boolean);
+          if (pointIds.length > 0) {
+            await supabase
+              .from('charging_points')
+              .update({ status: 'Available' })
+              .in('point_id', pointIds);
+            console.log(`✅ Released ${pointIds.length} charging point(s)`);
+          }
+        } else {
+          console.log('ℹ️ No old bookings to clean up');
+        }
+      }
+      
+      // For package payments: create user_package record
+      if (payment.package_id) {
+        console.log('📦 Creating user_package for payment:', {
+          user_id: payment.user_id,
+          package_id: payment.package_id
+        });
+        
+        // Get package details to calculate end_date
+        const { data: pkg } = await supabase
+          .from('service_packages')
+          .select('duration_days')
+          .eq('package_id', payment.package_id)
+          .single();
+        
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + (pkg?.duration_days || 30));
+        
+        // Create user_package record
+        const { error: userPackageError } = await supabase
+          .from('user_packages')
+          .insert({
+            user_id: payment.user_id,
+            package_id: payment.package_id,
+            start_date: startDate.toISOString(),
+            end_date: endDate.toISOString(),
+            status: 'active',
+            created_at: new Date().toISOString()
+          });
+        
+        if (userPackageError) {
+          console.error('❌ Failed to create user_package:', userPackageError);
+        } else {
+          console.log('✅ Created user_package successfully');
+        }
+      }
     }
 
     // Respond to MoMo
@@ -461,7 +591,7 @@ export const checkPaymentStatus = async (req, res) => {
     const { data: payments, error } = await supabase
       .from('payments')
       .select('*')
-      .eq('order_id', orderId);
+      .eq('transaction_id', orderId);
 
     console.log('📊 Payment query result:', {
       found: payments?.length > 0,
@@ -560,7 +690,7 @@ export const manualCompletePayment = async (req, res) => {
     const { data: payment, error: paymentError } = await supabase
       .from('payments')
       .select('*')
-      .eq('order_id', orderId)
+      .eq('transaction_id', orderId)
       .single();
 
     if (paymentError || !payment) {
@@ -630,8 +760,9 @@ export const manualCompletePayment = async (req, res) => {
 
     console.log('✅ Payment manually completed:', payment.payment_id);
 
-    // Update charging session with full completion data
+    // Handle post-payment actions based on payment type
     if (payment.session_id) {
+      // Update charging session with full completion data
       // Get current session to calculate final values
       const { data: currentSession, error: fetchError } = await supabase
         .from('charging_sessions')
@@ -732,7 +863,75 @@ export const manualCompletePayment = async (req, res) => {
             cost: updatedSession.cost,
             meter_end: updatedSession.meter_end
           });
+          
+          // 🔥 Auto-cleanup: Cancel any active/confirmed bookings for this user
+          console.log('🧹 Auto-cleaning up old reservations for user:', payment.user_id);
+          const { data: cancelledBookings, error: cancelError } = await supabase
+            .from('bookings')
+            .update({
+              status: 'Canceled',
+              canceled_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', payment.user_id)
+            .in('status', ['Active', 'Confirmed'])
+            .select('booking_id, point_id');
+          
+          if (cancelError) {
+            console.warn('⚠️ Failed to auto-cancel bookings:', cancelError);
+          } else if (cancelledBookings && cancelledBookings.length > 0) {
+            console.log(`✅ Auto-cancelled ${cancelledBookings.length} old booking(s)`);
+            
+            // Release charging points
+            const pointIds = cancelledBookings.map(b => b.point_id).filter(Boolean);
+            if (pointIds.length > 0) {
+              await supabase
+                .from('charging_points')
+                .update({ status: 'Available' })
+                .in('point_id', pointIds);
+              console.log(`✅ Released ${pointIds.length} charging point(s)`);
+            }
+          } else {
+            console.log('ℹ️ No old bookings to clean up');
+          }
         }
+      }
+    }
+
+    // Handle package payment: create user_package record
+    if (payment.package_id) {
+      console.log('📦 Creating user_package for manual payment:', {
+        user_id: payment.user_id,
+        package_id: payment.package_id
+      });
+      
+      // Get package details to calculate end_date
+      const { data: pkg } = await supabase
+        .from('service_packages')
+        .select('duration_days')
+        .eq('package_id', payment.package_id)
+        .single();
+      
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + (pkg?.duration_days || 30));
+      
+      // Create user_package record
+      const { error: userPackageError } = await supabase
+        .from('user_packages')
+        .insert({
+          user_id: payment.user_id,
+          package_id: payment.package_id,
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString(),
+          status: 'active',
+          created_at: new Date().toISOString()
+        });
+      
+      if (userPackageError) {
+        console.error('❌ Failed to create user_package:', userPackageError);
+      } else {
+        console.log('✅ Created user_package successfully');
       }
     }
 
@@ -804,9 +1003,140 @@ export const getUserPayments = async (req, res) => {
   }
 };
 
+// Create MoMo payment for package purchase
+export const createPackagePaymentSession = async (req, res) => {
+  try {
+    const {
+      package_id,
+      user_id,
+      amount,
+      currency = 'VND',
+      description = 'Package Purchase Payment'
+    } = req.body;
+
+    // Validate required fields
+    if (!package_id || !user_id || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: package_id, user_id, amount'
+      });
+    }
+
+    // Check if user already has an active package
+    const { data: activePackage } = await supabase
+      .from('user_packages')
+      .select('*')
+      .eq('user_id', user_id)
+      .eq('status', 'active')
+      .gte('end_date', new Date().toISOString())
+      .single();
+
+    if (activePackage) {
+      return res.status(409).json({
+        success: false,
+        error: 'active_package_exists',
+        message: 'Bạn đã có gói đang hoạt động. Vui lòng chờ hết hạn trước khi mua gói mới.'
+      });
+    }
+
+    // Get package details
+    const { data: pkg, error: pkgError } = await supabase
+      .from('service_packages')
+      .select('*')
+      .eq('package_id', package_id)
+      .single();
+
+    if (pkgError || !pkg) {
+      return res.status(404).json({
+        success: false,
+        error: 'Package not found'
+      });
+    }
+
+    // Get user details
+    const { data: user } = await supabase
+      .from('users')
+      .select('name, email')
+      .eq('user_id', user_id)
+      .single();
+
+    // Create payment record first
+    const { data: payment, error: paymentError } = await supabase
+      .from('payments')
+      .insert({
+        user_id,
+        package_id,
+        amount,
+        currency,
+        status: 'Pending',
+        method_id: 1, // MoMo
+        transaction_id: `PKG-${Date.now()}-${user_id}`,
+      })
+      .select()
+      .single();
+
+    if (paymentError) {
+      console.error('Failed to create payment record:', paymentError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create payment record'
+      });
+    }
+
+    console.log('✅ Created payment record:', payment.payment_id);
+
+    // Create MoMo payment
+    const orderId = `PKG${payment.payment_id}`;
+    
+    const momoResult = await createMoMoPayment({
+      orderId,
+      amount: Math.round(amount),
+      orderInfo: description || `Mua gói ${pkg.name}`,
+      extraData: JSON.stringify({
+        payment_id: payment.payment_id,
+        package_id,
+        user_id,
+        type: 'package'
+      })
+    });
+
+    // Update payment with MoMo info
+    await supabase
+      .from('payments')
+      .update({
+        transaction_id: orderId,
+      })
+      .eq('payment_id', payment.payment_id);
+
+    console.log('✅ MoMo payment created:', {
+      orderId,
+      payUrl: momoResult.payUrl
+    });
+
+    res.json({
+      success: true,
+      data: {
+        payment_id: payment.payment_id,
+        payment_url: momoResult.payUrl,
+        orderId,
+        amount
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating package payment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create package payment',
+      message: error.message
+    });
+  }
+};
+
 export default {
   createMoMoPayment,
   createPaymentSession,
+  createPackagePaymentSession,
   handleMoMoIPN,
   checkPaymentStatus,
   getUserPayments,

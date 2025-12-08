@@ -1,3 +1,55 @@
+/**
+ * ===============================================================
+ * EMAIL SERVICE (BACKEND)
+ * ===============================================================
+ * Service gửi email qua SMTP (Gmail) hoặc log ra console nếu chưa config
+ * 
+ * Chức năng:
+ * - ✉️ Gửi email xác thực đăng ký (verification code)
+ * - 🔑 Gửi email reset password (reset code)
+ * - 📧 Gửi email thông báo (booking confirmed, payment success, etc.)
+ * - 🎨 HTML email templates responsive, đẹp mắt
+ * - ⚠️ Fallback: Log to console nếu SMTP chưa config
+ * 
+ * Email templates:
+ * 
+ * 1. sendVerificationEmail(to, code)
+ *    - Gửi mã xác thực 6 số khi user đăng ký
+ *    - Code có hiệu lực 10 phút
+ *    - Template: Logo ChargeTech + Gradient header + Code box
+ * 
+ * 2. sendPasswordResetEmail(to, code)
+ *    - Gửi mã reset password 6 số
+ *    - Code có hiệu lực 10 phút
+ *    - Template tương tự verification nhưng chủ đề khác
+ * 
+ * 3. sendBookingConfirmationEmail(to, bookingData)
+ *    - Thông báo booking đã confirmed
+ *    - Hiển thị: Station name, address, time, charging point
+ * 
+ * 4. sendPaymentSuccessEmail(to, paymentData)
+ *    - Thông báo thanh toán thành công
+ *    - Hiển thị: Amount, method (MoMo/VNPay), session details
+ * 
+ * SMTP Configuration (.env):
+ * ```
+ * SMTP_HOST=smtp.gmail.com
+ * SMTP_PORT=587
+ * SMTP_USER=your-email@gmail.com
+ * SMTP_PASS=your-app-password  # Gmail App Password, NOT regular password
+ * ```
+ * 
+ * Security:
+ * - Sử dụng Gmail App Password, KHÔNG dùng password thường
+ * - TLS encryption (port 587) hoặc SSL (port 465)
+ * - Không log sensitive data (password, code) ra console
+ * 
+ * Dependencies:
+ * - nodemailer: SMTP client
+ * - dotenv: Load SMTP credentials từ .env
+ * - HTML/CSS: Inline styles cho email compatibility
+ */
+
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import path from 'path';

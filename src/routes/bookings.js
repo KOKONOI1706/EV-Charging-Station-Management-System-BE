@@ -1,3 +1,44 @@
+/**
+ * ===============================================================
+ * BOOKINGS ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes xử lý đặt chỗ sạc (bookings)
+ * 
+ * Endpoints:
+ * - GET /api/bookings - Lấy bookings của user hoặc tất cả
+ * - POST /api/bookings - Tạo booking mới
+ * - GET /api/bookings/:id - Lấy chi tiết 1 booking
+ * - PUT /api/bookings/:id/status - Cập nhật trạng thái booking
+ * - DELETE /api/bookings/:id - Hủy booking
+ * 
+ * Query params (GET /):
+ * - userId: Filter theo user_id
+ * - status: Filter theo status (Pending, Confirmed, Canceled, Completed)
+ * - limit: Số bookings trả về (mặc định 50)
+ * - offset: Pagination offset (mặc định 0)
+ * 
+ * Booking flow:
+ * 1. User tạo booking → status = Pending
+ * 2. System confirm (hoặc auto-confirm) → status = Confirmed
+ * 3. User check-in → Start charging session
+ * 4. Session kết thúc → status = Completed
+ * 5. User cancel hoặc hết hạn → status = Canceled
+ * 
+ * Validation:
+ * - Kiểm tra charging point có available không
+ * - Kiểm tra thời gian booking có trùng lặp không
+ * - Kiểm tra user tồn tại
+ * 
+ * Response joins:
+ * - users: user_id, name, email
+ * - charging_points: point_id, name, status, power_kw, station info
+ * - stations: id, name, address, city, lat, lng
+ * 
+ * Dependencies:
+ * - Supabase: Database operations
+ * - Middleware: requireAuth (xác thực user)
+ */
+
 import express from 'express';
 import supabase from '../supabase/client.js';
 
@@ -377,6 +418,84 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to cancel booking',
+      message: error.message
+    });
+  }
+});
+
+// POST /api/bookings/cancel-all-active - Cancel all active bookings for a user
+router.post('/cancel-all-active', async (req, res) => {
+  try {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'user_id is required'
+      });
+    }
+
+    console.log(`🗑️ Cancelling all active bookings for user ${user_id}`);
+
+    // Get all active bookings (including Confirmed status for reservations)
+    const { data: activeBookings, error: fetchError } = await supabase
+      .from('bookings')
+      .select('booking_id, point_id')
+      .eq('user_id', user_id)
+      .in('status', ['Active', 'Confirmed']);
+
+    if (fetchError) throw fetchError;
+
+    if (!activeBookings || activeBookings.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No active bookings to cancel',
+        cancelled_count: 0
+      });
+    }
+
+    console.log(`📋 Found ${activeBookings.length} active/confirmed bookings to cancel`);
+
+    // Cancel all active/confirmed bookings
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update({
+        status: 'Canceled',
+        canceled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', user_id)
+      .in('status', ['Active', 'Confirmed']);
+
+    if (updateError) throw updateError;
+
+    // Release all charging points
+    const pointIds = activeBookings.map(b => b.point_id).filter(Boolean);
+    
+    if (pointIds.length > 0) {
+      const { error: releaseError } = await supabase
+        .from('charging_points')
+        .update({ status: 'Available' })
+        .in('point_id', pointIds);
+
+      if (releaseError) {
+        console.warn('⚠️ Error releasing charging points:', releaseError);
+      } else {
+        console.log(`✅ Released ${pointIds.length} charging points`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Cancelled ${activeBookings.length} active booking(s)`,
+      cancelled_count: activeBookings.length
+    });
+
+  } catch (error) {
+    console.error('Error cancelling all active bookings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cancel bookings',
       message: error.message
     });
   }

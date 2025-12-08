@@ -1,3 +1,53 @@
+/**
+ * ===============================================================
+ * VEHICLES ROUTES (BACKEND)
+ * ===============================================================
+ * Express routes quản lý xe điện của users
+ * 
+ * Endpoints:
+ * 
+ * Metadata:
+ * - GET /api/vehicles/meta/connector-types - Lấy danh sách loại đầu sạc
+ * 
+ * CRUD Vehicles:
+ * - GET /api/vehicles - Lấy tất cả xe của user (required: user_id query param)
+ * - GET /api/vehicles/:id - Lấy chi tiết 1 xe
+ * - POST /api/vehicles - Tạo xe mới
+ * - PUT /api/vehicles/:id - Cập nhật thông tin xe
+ * - DELETE /api/vehicles/:id - Xóa xe
+ * 
+ * Vehicle schema:
+ * - vehicle_id: BIGINT (primary key)
+ * - user_id: BIGINT (foreign key → users)
+ * - plate_number: VARCHAR (biển số xe - unique)
+ * - make: VARCHAR (hãng xe, ví dụ: Tesla, VinFast)
+ * - model: VARCHAR (dòng xe, ví dụ: Model 3, VF e34)
+ * - year: INT (năm sản xuất)
+ * - color: VARCHAR (màu sắc)
+ * - battery_capacity_kwh: DECIMAL (dung lượng pin, ví dụ: 75.5)
+ * - connector_type_id: INT (foreign key → connector_types)
+ * 
+ * Connector Types:
+ * - Type 2 (IEC 62196)
+ * - CCS (Combined Charging System)
+ * - CHAdeMO
+ * - Tesla Supercharger
+ * - GB/T (China standard)
+ * 
+ * Response joins:
+ * - connector_types: connector_type_id, code, name, max_power_kw
+ * 
+ * Validation:
+ * - plate_number phải unique
+ * - user_id required
+ * - battery_capacity_kwh > 0
+ * - connector_type_id phải tồn tại trong connector_types
+ * 
+ * Dependencies:
+ * - Supabase Admin: Full access client
+ * - Middleware: requireAuth, requireOwnership (user chỉ quản lý xe của mình)
+ */
+
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 

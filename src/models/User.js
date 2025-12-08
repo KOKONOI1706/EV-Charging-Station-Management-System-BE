@@ -1,5 +1,41 @@
+/**
+ * ========================================
+ * USER MODEL
+ * ========================================
+ * Model để thao tác với bảng users trong database
+ * 
+ * Chức năng:
+ * - CRUD operations cho users:
+ *   + getAll(): Lấy tất cả users (Admin only)
+ *   + getById(id): Lấy user theo ID
+ *   + getByEmail(email): Lấy user theo email (cho login)
+ *   + create(userData): Tạo user mới
+ *   + update(id, updates): Cập nhật thông tin user
+ *   + delete(id): Xóa user
+ *   + checkEmailExists(email): Kiểm tra email đã tồn tại
+ * 
+ * Bảo mật:
+ * - Dùng supabaseAdmin client (bypass RLS policies)
+ * - Không trả về password hash trong các method get
+ * - Chỉ select các fields cần thiết
+ * 
+ * Trường dữ liệu:
+ * - user_id: Primary key (auto-increment)
+ * - name, email, phone: Thông tin cơ bản
+ * - password_hash: Mật khẩu đã hash (không trả về client)
+ * - role: Vai trò (liên kết với bảng roles)
+ * - is_active: Trạng thái tài khoản
+ * - email_verified: Đã xác thực email chưa
+ * - created_at, updated_at: Timestamps
+ */
+
+// Import Supabase admin client (bypass RLS)
 import { supabaseAdmin } from '../config/supabase.js';
 
+/**
+ * Class UserModel - Model cho người dùng
+ * Tất cả methods đều static vì không cần instance
+ */
 export class UserModel {
   static async getAll() {
     try {
