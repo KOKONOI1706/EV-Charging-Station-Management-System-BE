@@ -2,6 +2,8 @@
 
 Backend REST API for an EV charging station management platform, covering station discovery, reservations, charging sessions, payments, authentication, authorization, and analytics.
 
+**[Live Demo](https://swp-391-nguyn-duy-congs-projects.vercel.app/)** · [Frontend](../EV-Charging-Station-Management-System-FE) · [Architecture](./docs/ARCHITECTURE.md)
+
 > Portfolio project focused on translating business workflows into a structured backend system.
 
 ## My Contribution
